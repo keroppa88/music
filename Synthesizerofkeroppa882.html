@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Synthesizer of keroppa88 II</title>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --panel:#fbfbfb;
+      --border:#d9d9d9;
+      --text:#111;
+      --muted:#666;
+      --btn:#ffffff;
+      --btn2:#ffffff;
+      --accent:#111;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans JP", sans-serif;
+      margin:24px;
+      color:var(--text);
+      background:var(--bg);
+    }
+    h1{ font-size:22px; margin:0 0 14px; font-weight:700;}
+    .grid{
+      display:grid;
+      grid-template-columns: 34px repeat(6, minmax(170px, 1fr));
+      gap:14px;
+      align-items:stretch;
+    }
+    .rowLabel{
+      font-weight:700;
+      font-size:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:var(--text);
+    }
+    .card{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:12px 12px 10px;
+      box-shadow: 0 1px 0 rgba(0,0,0,.02);
+      min-height:92px;
+    }
+    .cardTitle{
+      font-weight:700;
+      font-size:14px;
+      margin-bottom:8px;
+    }
+    .ctrlRow{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .sliderWrap{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+    input[type="range"]{ width:100%; }
+    .valueText{
+      font-variant-numeric: tabular-nums;
+      color:var(--muted);
+      font-size:13px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .stepper{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      user-select:none;
+      align-items:stretch;
+    }
+    .stepper button{
+      width:34px;
+      height:28px;
+      border:1px solid var(--border);
+      background:var(--btn);
+      color:var(--text);
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:800;
+      line-height:1;
+    }
+    .stepper button:active{ transform: translateY(1px); }
+
+    .muteBtn{
+      width:34px;
+      height:32px;
+      border:1px solid var(--border);
+      background:var(--btn2);
+      color:var(--text);
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:900;
+      letter-spacing:.02em;
+    }
+    .muteBtn.on{
+      background:#ffe8e8;
+      border-color:#e0a3a3;
+      color:#7a0000;
+    }
+
+    select{
+      width:100%;
+      height:32px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      background:var(--btn);
+      color:var(--text);
+      padding:4px 8px;
+      font-size:14px;
+    }
+    .bottomBar{
+      margin-top:18px;
+      display:flex;
+      align-items:center;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+    .bottomBar label{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-weight:700;
+    }
+    .bottomBar select{
+      width:auto;
+      min-width:160px;
+    }
+    .btns{
+      margin-left:auto;
+      display:flex;
+      gap:10px;
+    }
+    button.primary{
+      padding:10px 16px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:var(--accent);
+      color:#fff;
+      cursor:pointer;
+      font-weight:900;
+    }
+    button.secondary{
+      padding:10px 16px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:var(--btn);
+      color:var(--text);
+      cursor:pointer;
+      font-weight:900;
+    }
+    .note{
+      margin-top:10px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.4;
+    }
+    .note code{ color:var(--text); }
+  </style>
+</head>
+<body>
+  <h1>Synthesizer of keroppa88 II</h1>
+
+  <div class="grid" id="uiGrid">
+    <!-- Row A -->
+    <div class="rowLabel">A</div>
+
+    <div class="card" data-voice="0" data-param="vol">
+      <div class="cardTitle">音量</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="12">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+          <button class="muteBtn" title="Mute">M</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="0" data-param="freq">
+      <div class="cardTitle">周波数</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="40" max="2000" step="1" value="250">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="0" data-param="wave">
+      <div class="cardTitle">波形</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <select>
+            <option value="sine">sine</option>
+            <option value="triangle">triangle</option>
+            <option value="square" selected>square</option>
+            <option value="sawtooth">sawtooth</option>
+          </select>
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="0" data-param="filt">
+      <div class="cardTitle">フィルタ（LPF）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="100" max="8000" step="1" value="1057">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="0" data-param="modDepth">
+      <div class="cardTitle">変調（ビブラート量）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="0" data-param="modRate">
+      <div class="cardTitle">変調 速度</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <!-- 1..200 => 0.1..20.0 Hz -->
+          <input type="range" min="1" max="200" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row B -->
+    <div class="rowLabel">B</div>
+
+    <div class="card" data-voice="1" data-param="vol">
+      <div class="cardTitle">音量</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="12">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+          <button class="muteBtn" title="Mute">M</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="1" data-param="freq">
+      <div class="cardTitle">周波数</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="40" max="2000" step="1" value="250">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="1" data-param="wave">
+      <div class="cardTitle">波形</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <select>
+            <option value="sine">sine</option>
+            <option value="triangle">triangle</option>
+            <option value="square" selected>square</option>
+            <option value="sawtooth">sawtooth</option>
+          </select>
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="1" data-param="filt">
+      <div class="cardTitle">フィルタ（LPF）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="100" max="8000" step="1" value="1057">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="1" data-param="modDepth">
+      <div class="cardTitle">変調（ビブラート量）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="1" data-param="modRate">
+      <div class="cardTitle">変調 速度</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="1" max="200" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row C -->
+    <div class="rowLabel">C</div>
+
+    <div class="card" data-voice="2" data-param="vol">
+      <div class="cardTitle">音量</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="12">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+          <button class="muteBtn" title="Mute">M</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="2" data-param="freq">
+      <div class="cardTitle">周波数</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="40" max="2000" step="1" value="250">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="2" data-param="wave">
+      <div class="cardTitle">波形</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <select>
+            <option value="sine">sine</option>
+            <option value="triangle">triangle</option>
+            <option value="square" selected>square</option>
+            <option value="sawtooth">sawtooth</option>
+          </select>
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="2" data-param="filt">
+      <div class="cardTitle">フィルタ（LPF）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="100" max="8000" step="1" value="1057">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="2" data-param="modDepth">
+      <div class="cardTitle">変調（ビブラート量）</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="0" max="100" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-voice="2" data-param="modRate">
+      <div class="cardTitle">変調 速度</div>
+      <div class="ctrlRow">
+        <div class="sliderWrap">
+          <input type="range" min="1" max="200" step="1" value="19">
+          <div class="valueText"><span class="val"></span></div>
+        </div>
+        <div class="stepper">
+          <button class="up">▲</button>
+          <button class="down">▼</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottomBar">
+    <label>コード
+      <select id="chordSel">
+        <!-- この順番が 0～9 の割当順 -->
+        <option>Aメジャー</option>   <!-- 0 -->
+        <option>Aマイナー</option>   <!-- 1 -->
+        <option>B♭メジャー</option>  <!-- 2 -->
+        <option>Cメジャー</option>   <!-- 3 -->
+        <option>Dメジャー</option>   <!-- 4 -->
+        <option>Dマイナー</option>   <!-- 5 -->
+        <option>Eメジャー</option>   <!-- 6 -->
+        <option>Eマイナー7</option>  <!-- 7 -->
+        <option>Fメジャー</option>   <!-- 8 -->
+        <option>Gメジャー</option>   <!-- 9 -->
+      </select>
+    </label>
+
+    <label>オクターブ
+      <select id="octSel">
+        <option value="2">C2</option>
+        <option value="3">C3</option>
+        <option value="4" selected>C4</option>
+        <option value="5">C5</option>
+      </select>
+    </label>
+
+    <div class="btns">
+      <button class="primary" id="playBtn">PLAY</button>
+      <button class="secondary" id="stopBtn" disabled>STOP</button>
+    </div>
+  </div>
+
+  <div class="note">
+    仕様: コード再選択は周波数を常に上書き。STOPしても設定は保持。<br>
+    ショートカット: コードは <code>0</code>〜<code>9</code>。オクターブは <code>A</code>=C2 / <code>S</code>=C3 / <code>D</code>=C4 / <code>F</code>=C5。
+  </div>
+
+<script>
+(() => {
+  // ======== State (3 voices: 0=高, 1=中, 2=低) ========
+  const WAVE_ORDER = ["sine","triangle","square","sawtooth"];
+
+  const voicesState = [
+    { vol:12, muted:false, freq:250, wave:"square", filt:1057, modDepth:19, modRate:19 }, // A (high)
+    { vol:12, muted:false, freq:250, wave:"square", filt:1057, modDepth:19, modRate:19 }, // B (mid)
+    { vol:12, muted:false, freq:250, wave:"square", filt:1057, modDepth:19, modRate:19 }, // C (low)
+  ];
+
+  // ======== Chords ========
+  const NOTE_TO_SEMITONE = {
+    C:0, "C#":1, D:2, "D#":3, E:4, F:5, "F#":6, G:7, "G#":8, A:9, "A#":10, Bb:10, B:11
+  };
+
+  const CHORD_TABLE = {
+    "Aメジャー":  { root:"A",  intervals:[0,4,7] },
+    "Aマイナー":  { root:"A",  intervals:[0,3,7] },
+    "B♭メジャー": { root:"Bb", intervals:[0,4,7] },
+    "Cメジャー":  { root:"C",  intervals:[0,4,7] },
+    "Dメジャー":  { root:"D",  intervals:[0,4,7] },
+    "Dマイナー":  { root:"D",  intervals:[0,3,7] },
+    "Eメジャー":  { root:"E",  intervals:[0,4,7] },
+    "Eマイナー7": { root:"E",  intervals:[0,3,10] }, // 3音なので 5th省略（Root/m3/m7）
+    "Fメジャー":  { root:"F",  intervals:[0,4,7] },
+    "Gメジャー":  { root:"G",  intervals:[0,4,7] },
+  };
+
+  function noteToMidi(note, octave){
+    return 12 * (octave + 1) + NOTE_TO_SEMITONE[note]; // C4=60
+  }
+  function midiToHz(midi){
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  // ======== Audio Engine ========
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  let ctx = null;
+  let running = false;
+
+  const engine = [
+    { osc:null, mix:null, osc2:null, mix2:null, filter:null, amp:null, lfo:null, lfoGain:null },
+    { osc:null, mix:null, osc2:null, mix2:null, filter:null, amp:null, lfo:null, lfoGain:null },
+    { osc:null, mix:null, osc2:null, mix2:null, filter:null, amp:null, lfo:null, lfoGain:null },
+  ];
+
+  const MASTER = { gain:null };
+  const FADE = 0.03;
+
+  function ensureCtx(){
+    if (!ctx) ctx = new AudioContext();
+    return ctx;
+  }
+
+  function setParamSmooth(param, value, tc=0.01){
+    const t = ctx.currentTime;
+    try { param.cancelScheduledValues(t); } catch {}
+    param.setTargetAtTime(value, t, tc);
+  }
+
+  function volToGain(v0_100){
+    const x = Math.max(0, Math.min(100, v0_100)) / 100;
+    return x * x;
+  }
+
+  function modRateToHz(rateInt1_200){
+    return Math.max(0.1, Math.min(20.0, rateInt1_200 / 10));
+  }
+
+  function effectiveAmpGain(st){
+    return st.muted ? 0.0001 : Math.max(0.0001, volToGain(st.vol));
+  }
+
+  function createVoiceNodes(i){
+    const st = voicesState[i];
+    const e = engine[i];
+
+    e.filter = ctx.createBiquadFilter();
+    e.filter.type = "lowpass";
+    e.filter.frequency.value = st.filt;
+    e.filter.Q.value = 0.707;
+
+    e.amp = ctx.createGain();
+    e.amp.gain.value = 0.0001;
+
+    e.osc = ctx.createOscillator();
+    e.osc.type = st.wave;
+    e.osc.frequency.value = st.freq;
+
+    e.mix = ctx.createGain();
+    e.mix.gain.value = 1.0;
+
+    e.osc.connect(e.mix);
+    e.mix.connect(e.filter);
+    e.filter.connect(e.amp);
+
+    e.lfo = ctx.createOscillator();
+    e.lfo.type = "sine";
+    e.lfo.frequency.value = modRateToHz(st.modRate);
+
+    e.lfoGain = ctx.createGain();
+    e.lfoGain.gain.value = st.modDepth;
+
+    e.lfo.connect(e.lfoGain);
+    e.lfoGain.connect(e.osc.frequency);
+
+    e.amp.connect(MASTER.gain);
+
+    e.osc.start();
+    e.lfo.start();
+  }
+
+  function startAll(){
+    ensureCtx();
+    if (ctx.state === "suspended") ctx.resume();
+
+    if (!MASTER.gain){
+      MASTER.gain = ctx.createGain();
+      MASTER.gain.gain.value = 0.9;
+      MASTER.gain.connect(ctx.destination);
+    }
+
+    for (let i=0;i<3;i++){
+      engine[i] = { osc:null, mix:null, osc2:null, mix2:null, filter:null, amp:null, lfo:null, lfoGain:null };
+      createVoiceNodes(i);
+    }
+    running = true;
+    document.getElementById("playBtn").disabled = true;
+    document.getElementById("stopBtn").disabled = false;
+
+    for (let i=0;i<3;i++) applyStateToEngine(i, true);
+  }
+
+  function stopAll(){
+    if (!running) return;
+    const t = ctx.currentTime;
+
+    for (let i=0;i<3;i++){
+      const e = engine[i];
+      if (e.amp){
+        const g = e.amp.gain;
+        try { g.cancelScheduledValues(t); } catch {}
+        g.setValueAtTime(g.value, t);
+        g.linearRampToValueAtTime(0.0001, t + 0.04);
+      }
+      const stopAt = t + 0.06;
+      try { e.osc && e.osc.stop(stopAt); } catch {}
+      try { e.osc2 && e.osc2.stop(stopAt); } catch {}
+      try { e.lfo && e.lfo.stop(stopAt); } catch {}
+    }
+
+    running = false;
+    document.getElementById("playBtn").disabled = false;
+    document.getElementById("stopBtn").disabled = true;
+  }
+
+  function crossfadeWave(i, newWave){
+    const e = engine[i];
+    if (!running || !e.osc || !e.mix || !e.filter) return;
+    if (e.osc.type === newWave) return;
+
+    if (e.osc2){
+      try { e.osc2.stop(); } catch {}
+      e.osc2 = null;
+      e.mix2 = null;
+    }
+
+    const st = voicesState[i];
+
+    e.osc2 = ctx.createOscillator();
+    e.osc2.type = newWave;
+    e.osc2.frequency.value = st.freq;
+
+    e.mix2 = ctx.createGain();
+    e.mix2.gain.value = 0.0;
+
+    e.osc2.connect(e.mix2);
+    e.mix2.connect(e.filter);
+    if (e.lfoGain) e.lfoGain.connect(e.osc2.frequency);
+
+    e.osc2.start();
+
+    const t = ctx.currentTime;
+
+    e.mix.gain.cancelScheduledValues(t);
+    e.mix2.gain.cancelScheduledValues(t);
+
+    e.mix.gain.setValueAtTime(e.mix.gain.value, t);
+    e.mix2.gain.setValueAtTime(e.mix2.gain.value, t);
+
+    e.mix.gain.linearRampToValueAtTime(0.0001, t + FADE);
+    e.mix2.gain.linearRampToValueAtTime(1.0, t + FADE);
+
+    const oldOsc = e.osc;
+    const oldMix = e.mix;
+
+    setTimeout(() => {
+      if (!running) return;
+      try { oldOsc.stop(); } catch {}
+      try { oldMix.disconnect(); } catch {}
+      e.osc = e.osc2;
+      e.mix = e.mix2;
+      e.osc2 = null;
+      e.mix2 = null;
+    }, Math.ceil((FADE + 0.01) * 1000));
+  }
+
+  function applyStateToEngine(i, immediate=false){
+    const st = voicesState[i];
+    const e = engine[i];
+    if (!running || !e.osc || !e.filter || !e.amp || !e.lfo || !e.lfoGain) return;
+
+    const tc = immediate ? 0.001 : 0.02;
+
+    setParamSmooth(e.amp.gain, effectiveAmpGain(st), tc);
+    setParamSmooth(e.osc.frequency, st.freq, 0.01);
+    if (e.osc2) setParamSmooth(e.osc2.frequency, st.freq, 0.01);
+
+    setParamSmooth(e.filter.frequency, st.filt, 0.02);
+    setParamSmooth(e.lfoGain.gain, st.modDepth, 0.02);
+    setParamSmooth(e.lfo.frequency, modRateToHz(st.modRate), 0.02);
+
+    crossfadeWave(i, st.wave);
+  }
+
+  // ======== UI Wiring ========
+  const cards = Array.from(document.querySelectorAll(".card"));
+
+  function formatValue(param, v, vi){
+    const st = voicesState[vi];
+    if (param === "vol") return st.muted ? `MUTED (${v}/100)` : `${v} / 100`;
+    if (param === "freq") return `${v} Hz`;
+    if (param === "filt") return `${v} Hz`;
+    if (param === "modDepth") return `${v} Hz`;
+    if (param === "modRate") return `${(v/10).toFixed(1)} Hz`;
+    if (param === "wave") return `${v}`;
+    return String(v);
+  }
+
+  function readCardValue(card){
+    const param = card.dataset.param;
+    if (param === "wave"){
+      return card.querySelector("select").value;
+    } else {
+      return Number(card.querySelector('input[type="range"]').value);
+    }
+  }
+
+  function writeCardValue(card, value){
+    const param = card.dataset.param;
+    const vi = Number(card.dataset.voice);
+
+    if (param === "wave"){
+      card.querySelector("select").value = value;
+    } else {
+      card.querySelector('input[type="range"]').value = String(value);
+    }
+    card.querySelector(".val").textContent = formatValue(param, value, vi);
+
+    if (param === "vol"){
+      const mb = card.querySelector(".muteBtn");
+      if (mb) mb.classList.toggle("on", voicesState[vi].muted);
+    }
+  }
+
+  function syncCardToState(card){
+    const vi = Number(card.dataset.voice);
+    const param = card.dataset.param;
+    const v = readCardValue(card);
+
+    if (param === "wave"){
+      voicesState[vi].wave = v;
+      writeCardValue(card, v);
+    } else {
+      voicesState[vi][param] = v;
+      writeCardValue(card, v);
+    }
+    applyStateToEngine(vi);
+  }
+
+  // Initialize labels from inputs + state
+  for (const card of cards){
+    const vi = Number(card.dataset.voice);
+    const param = card.dataset.param;
+
+    if (param === "wave"){
+      const v = card.querySelector("select").value;
+      voicesState[vi].wave = v;
+      writeCardValue(card, v);
+    } else {
+      const v = Number(card.querySelector('input[type="range"]').value);
+      voicesState[vi][param] = v;
+      writeCardValue(card, v);
+    }
+  }
+
+  // Input listeners + steppers + mute
+  for (const card of cards){
+    const vi = Number(card.dataset.voice);
+    const param = card.dataset.param;
+
+    if (param === "wave"){
+      card.querySelector("select").addEventListener("change", () => syncCardToState(card));
+    } else {
+      card.querySelector('input[type="range"]').addEventListener("input", () => syncCardToState(card));
+    }
+
+    const up = card.querySelector("button.up");
+    const down = card.querySelector("button.down");
+
+    const stepOne = (dir) => {
+      if (param === "wave"){
+        const sel = card.querySelector("select");
+        const idx = WAVE_ORDER.indexOf(sel.value);
+        const next = Math.max(0, Math.min(WAVE_ORDER.length-1, idx + dir));
+        sel.value = WAVE_ORDER[next];
+        sel.dispatchEvent(new Event("change", { bubbles:true }));
+        return;
+      }
+      const inp = card.querySelector('input[type="range"]');
+      const min = Number(inp.min), max = Number(inp.max);
+      const cur = Number(inp.value);
+      const nxt = Math.max(min, Math.min(max, cur + dir));
+      inp.value = String(nxt);
+      inp.dispatchEvent(new Event("input", { bubbles:true }));
+    };
+
+    up.addEventListener("click", () => stepOne(+1));
+    down.addEventListener("click", () => stepOne(-1));
+
+    if (param === "vol"){
+      const muteBtn = card.querySelector(".muteBtn");
+      muteBtn.addEventListener("click", () => {
+        voicesState[vi].muted = !voicesState[vi].muted;
+        const v = Number(card.querySelector('input[type="range"]').value);
+        writeCardValue(card, v);
+        applyStateToEngine(vi);
+      });
+      muteBtn.classList.toggle("on", voicesState[vi].muted);
+    }
+  }
+
+  // ======== Chord apply (overwrite frequencies only) ========
+  const chordSel = document.getElementById("chordSel");
+  const octSel = document.getElementById("octSel");
+
+  function overwriteFrequenciesByChord(){
+    const chordName = chordSel.value;
+    const octave = Number(octSel.value);
+    const chord = CHORD_TABLE[chordName];
+    if (!chord) return;
+
+    const rootMidi = noteToMidi(chord.root, octave);
+    const mids = chord.intervals.map(x => rootMidi + x).sort((a,b)=>a-b); // low..high
+    const freqs = mids.map(m => midiToHz(m));
+
+    // UI ordering: A=高, B=中, C=低
+    voicesState[0].freq = Math.round(freqs[2]);
+    voicesState[1].freq = Math.round(freqs[1]);
+    voicesState[2].freq = Math.round(freqs[0]);
+
+    for (const card of cards){
+      const vi = Number(card.dataset.voice);
+      const param = card.dataset.param;
+      if (param !== "freq") continue;
+      writeCardValue(card, voicesState[vi].freq);
+    }
+
+    if (running){
+      for (let i=0;i<3;i++) applyStateToEngine(i);
+    }
+  }
+
+  chordSel.addEventListener("change", overwriteFrequenciesByChord);
+  octSel.addEventListener("change", overwriteFrequenciesByChord);
+
+  // ======== Keyboard shortcuts for chord (0..9) + octave (A/S/D/F) ========
+  const OCT_KEY_TO_VALUE = { a:"2", s:"3", d:"4", f:"5" };
+
+  window.addEventListener("keydown", (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+    const key = ev.key;
+
+    // chord 0..9
+    if (key.length === 1 && key >= "0" && key <= "9") {
+      const idx = Number(key);
+      if (idx >= 0 && idx < chordSel.options.length){
+        chordSel.selectedIndex = idx;
+        overwriteFrequenciesByChord();
+        ev.preventDefault();
+      }
+      return;
+    }
+
+    // octave A/S/D/F (C2/C3/C4/C5)
+    const k = key.toLowerCase();
+    if (OCT_KEY_TO_VALUE[k]) {
+      octSel.value = OCT_KEY_TO_VALUE[k];
+      overwriteFrequenciesByChord();
+      ev.preventDefault();
+      return;
+    }
+  });
+
+  // ======== Play/Stop ========
+  document.getElementById("playBtn").addEventListener("click", async () => {
+    ensureCtx();
+    if (ctx.state === "suspended") await ctx.resume();
+    startAll();
+    for (let i=0;i<3;i++) applyStateToEngine(i, true);
+  });
+
+  document.getElementById("stopBtn").addEventListener("click", stopAll);
+
+})();
+</script>
+</body>
+</html>
