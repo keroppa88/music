@@ -342,6 +342,15 @@
       border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:900;
     }
     .seqHint{ margin-top:8px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .seqSave{ margin-top:12px; }
+    .seqSaveBtns{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+    .seqSave textarea{
+      width:100%; min-height:84px; resize:vertical;
+      border:1px solid var(--border); border-radius:8px;
+      padding:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px; line-height:1.5; color:var(--text); background:#fff;
+      white-space:pre; overflow:auto;
+    }
 
   </style>
 </head>
@@ -614,17 +623,29 @@
         <button class="primary" id="seqPlayBtn" type="button">▶ 再生</button>
         <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
         <button class="small" id="seqAddBtn" type="button">＋トラック</button>
+        <button class="small" id="seqWavBtn" type="button">WAV出力</button>
         <div class="val" id="seqTrackCount">トラック 0 / 6</div>
         <button class="secondary" id="seqBackBtn" type="button" style="margin-left:auto;">戻る</button>
       </div>
       <div class="seqTracks" id="seqTracks"></div>
+
+      <div class="seqSave">
+        <div class="seqSaveBtns">
+          <button class="small" id="seqCopyBtn" type="button">数字で出力</button>
+          <button class="small" id="seqLoadBtn" type="button">貼り付けて読込</button>
+          <span class="seqHint" style="margin:0;">パターンを数字テキストで保存／復元（コピペして後日読込可）</span>
+        </div>
+        <textarea id="seqTextArea" spellcheck="false" placeholder="ここに「数字で出力」した内容が入ります。後日ここに貼り付けて「貼り付けて読込」で復元できます。"></textarea>
+      </div>
+
       <div class="seqHint">
         入力: セルをクリックして選択 → 数字キーで記録。<br>
         ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
         ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
         前音を伸ばす（タイ）は <code>-</code> キーで「−」を入力。 休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。<br>
         各トラックで種別・音色・オクターブ・四分／八分を選択。四分音符のマスは八分音符の2倍幅（マスの長さ＝音の長さ）。<br>
-        ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。
+        ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。<br>
+        WAV出力: 現在のパターンを1ループ分、音声ファイル（.wav）として書き出します。
       </div>
     </div>
   </div>
@@ -1372,6 +1393,10 @@
   const seqStopBtn = document.getElementById("seqStopBtn");
   const seqAddBtn = document.getElementById("seqAddBtn");
   const seqTrackCountEl = document.getElementById("seqTrackCount");
+  const seqWavBtn = document.getElementById("seqWavBtn");
+  const seqCopyBtn = document.getElementById("seqCopyBtn");
+  const seqLoadBtn = document.getElementById("seqLoadBtn");
+  const seqTextArea = document.getElementById("seqTextArea");
 
   function seqStepsLen(res){ return SEQ_BARS * SEQ_BEATS * (res === 8 ? 2 : 1); } // 64 or 32
 
@@ -1620,20 +1645,20 @@
 
   // ---- 単発トリガ（メイン画面の音色を使用） ----
   // st: voicesState[i]（wave/filt/modDepth/modRate/vol/muted）を使い、音色を再現
-  function seqTriggerVoiced(freq, when, dur, st, mult){
+  function seqTriggerVoiced(ac, dest, freq, when, dur, st, mult){
     if (!st || st.muted) return;
     const m = (mult == null) ? 1 : mult;
-    const o = ctx.createOscillator();
+    const o = ac.createOscillator();
     o.type = st.wave || "triangle";
     o.frequency.value = freq;
 
-    const f = ctx.createBiquadFilter();
+    const f = ac.createBiquadFilter();
     f.type = "lowpass";
     f.frequency.value = st.filt || 8000;
     f.Q.value = 0.707;
 
-    const g = ctx.createGain();
-    // 音量はメイン画面と同じ（volToGain × seqMaster 0.9）
+    const g = ac.createGain();
+    // 音量はメイン画面と同じ（volToGain × master 0.9）
     const peak = Math.max(0.0006, volToGain(st.vol) * m);
     // 持続的なエンベロープ（素早いアタック→保持→末尾で短いリリース）
     const atk = 0.012;
@@ -1644,14 +1669,14 @@
     g.gain.setValueAtTime(peak, holdEnd);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
 
-    o.connect(f); f.connect(g); g.connect(seqMaster);
+    o.connect(f); f.connect(g); g.connect(dest);
 
     // ビブラート（変調）
     if (st.modDepth > 0){
-      const lfo = ctx.createOscillator();
+      const lfo = ac.createOscillator();
       lfo.type = "sine";
       lfo.frequency.value = modRateToHz(st.modRate);
-      const lg = ctx.createGain();
+      const lg = ac.createGain();
       lg.gain.value = st.modDepth;
       lfo.connect(lg); lg.connect(o.frequency);
       lfo.start(when); lfo.stop(when + dur + 0.03);
@@ -1674,56 +1699,56 @@
   }
 
   // ---- ドラム合成 ----
-  function seqTriggerDrum(kind, when, mult){
+  function seqTriggerDrum(ac, dest, kind, when, mult){
     const m = (mult == null) ? 1 : mult;
     if (kind === "kick"){
-      const o = ctx.createOscillator(); o.type = "sine";
+      const o = ac.createOscillator(); o.type = "sine";
       o.frequency.setValueAtTime(150, when);
       o.frequency.exponentialRampToValueAtTime(50, when + 0.12);
-      const g = ctx.createGain();
+      const g = ac.createGain();
       g.gain.setValueAtTime(0.9 * m, when);
       g.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
-      o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.2);
+      o.connect(g); g.connect(dest); o.start(when); o.stop(when + 0.2);
       return;
     }
     if (kind === "tom"){
-      const o = ctx.createOscillator(); o.type = "sine";
+      const o = ac.createOscillator(); o.type = "sine";
       o.frequency.setValueAtTime(220, when);
       o.frequency.exponentialRampToValueAtTime(90, when + 0.18);
-      const g = ctx.createGain();
+      const g = ac.createGain();
       g.gain.setValueAtTime(0.7 * m, when);
       g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
-      o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.24);
+      o.connect(g); g.connect(dest); o.start(when); o.stop(when + 0.24);
       return;
     }
     // ノイズ系（snare / hat / openhat / clap）
     const dur = (kind === "openhat") ? 0.3 : (kind === "snare" || kind === "clap") ? 0.18 : 0.05;
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
     const d = buf.getChannelData(0);
     for (let i=0;i<len;i++) d[i] = Math.random()*2 - 1;
-    const src = ctx.createBufferSource(); src.buffer = buf;
-    const hp = ctx.createBiquadFilter();
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const hp = ac.createBiquadFilter();
     hp.type = (kind === "snare" || kind === "clap") ? "highpass" : "highpass";
     hp.frequency.value = (kind === "hat" || kind === "openhat") ? 7000 : 1500;
-    const g = ctx.createGain();
+    const g = ac.createGain();
     const peak = ((kind === "snare") ? 0.6 : (kind === "clap") ? 0.5 : 0.35) * m;
     g.gain.setValueAtTime(Math.max(0.0002, peak), when);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-    src.connect(hp); hp.connect(g); g.connect(seqMaster);
+    src.connect(hp); hp.connect(g); g.connect(dest);
     src.start(when); src.stop(when + dur + 0.02);
     if (kind === "snare"){
       // 胴鳴り成分
-      const o = ctx.createOscillator(); o.type="triangle"; o.frequency.value=180;
-      const og = ctx.createGain();
+      const o = ac.createOscillator(); o.type="triangle"; o.frequency.value=180;
+      const og = ac.createGain();
       og.gain.setValueAtTime(0.4 * m, when);
       og.gain.exponentialRampToValueAtTime(0.0001, when + 0.12);
-      o.connect(og); og.connect(seqMaster); o.start(when); o.stop(when + 0.14);
+      o.connect(og); og.connect(dest); o.start(when); o.stop(when + 0.14);
     }
   }
 
-  function seqScheduleStep(globalStep, when){
-    const baseOct = Number(octSel.value);
+  // 1ステップ分の発音を任意のコンテキスト/出力先へ（リアルタイム/オフライン共通）
+  function seqEmitStep(ac, dest, baseOct, globalStep, when){
     SEQ.tracks.forEach((tr) => {
       if (tr.mute) return;
       // このトラックがこのグローバル(八分)ステップで発音するか
@@ -1750,19 +1775,23 @@
         const n = mids.length;
         for (let i=0;i<n;i++){
           const voiceIdx = Math.max(0, Math.min(VOICES-1, (n-1) - i)); // 低音=D(3) … 高音=A(0)
-          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx], mult);
+          seqTriggerVoiced(ac, dest, midiToHz(mids[i]), when, dur, voicesState[voiceIdx], mult);
         }
       } else if (tr.type === "drum"){
         const kind = SEQ_DRUMS[v];
-        if (kind) seqTriggerDrum(kind, when, mult);
+        if (kind) seqTriggerDrum(ac, dest, kind, when, mult);
       } else {
         if (v === 0) return;
         // 単音はトラックで選んだ音色（A/B/C/D）を使用
         const st = voicesState[Math.max(0, Math.min(VOICES-1, tr.voice || 0))];
-        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st, mult);
+        seqTriggerVoiced(ac, dest, midiToHz(noteMidiByDigit(v, octave)), when, dur, st, mult);
       }
     });
-    // 再生ヘッド表示
+  }
+
+  // リアルタイム用：発音＋再生ヘッド表示
+  function seqScheduleStep(globalStep, when){
+    seqEmitStep(ctx, seqMaster, Number(octSel.value), globalStep, when);
     seqHighlightPlayhead(globalStep, when);
   }
 
@@ -1822,6 +1851,135 @@
 
   seqPlayBtn.addEventListener("click", seqStart);
   seqStopBtn.addEventListener("click", seqStop);
+
+  // ======== WAV書き出し（OfflineAudioContextでオフラインレンダリング） ========
+  function audioBufferToWav(buf){
+    const numCh = buf.numberOfChannels;
+    const sr = buf.sampleRate;
+    const numFrames = buf.length;
+    const bytesPerSample = 2;
+    const blockAlign = numCh * bytesPerSample;
+    const dataSize = numFrames * blockAlign;
+    const ab = new ArrayBuffer(44 + dataSize);
+    const dv = new DataView(ab);
+    let p = 0;
+    const wstr = (s) => { for (let i=0;i<s.length;i++) dv.setUint8(p++, s.charCodeAt(i)); };
+    const wu32 = (v) => { dv.setUint32(p, v, true); p += 4; };
+    const wu16 = (v) => { dv.setUint16(p, v, true); p += 2; };
+    wstr("RIFF"); wu32(36 + dataSize); wstr("WAVE");
+    wstr("fmt "); wu32(16); wu16(1); wu16(numCh); wu32(sr);
+    wu32(sr * blockAlign); wu16(blockAlign); wu16(16);
+    wstr("data"); wu32(dataSize);
+    const chans = [];
+    for (let c=0;c<numCh;c++) chans.push(buf.getChannelData(c));
+    for (let i=0;i<numFrames;i++){
+      for (let c=0;c<numCh;c++){
+        let s = Math.max(-1, Math.min(1, chans[c][i]));
+        dv.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7FFF, true); p += 2;
+      }
+    }
+    return new Blob([ab], { type: "audio/wav" });
+  }
+
+  async function seqExportWav(loops){
+    if (!SEQ.tracks.length) return;
+    const reps = Math.max(1, loops || 1);
+    const secPerGlobalStep = (60 / SEQ.bpm) / 2;
+    const loopDur = SEQ_GLOBAL_STEPS * secPerGlobalStep;
+    const tail = 0.8; // 末尾の余韻
+    const sr = 44100;
+    const total = loopDur * reps + tail;
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const oac = new OAC(2, Math.ceil(sr * total), sr);
+    const master = oac.createGain();
+    master.gain.value = 0.9;
+    master.connect(oac.destination);
+    const baseOct = Number(octSel.value);
+    for (let r=0;r<reps;r++){
+      for (let g=0;g<SEQ_GLOBAL_STEPS;g++){
+        const when = (r * SEQ_GLOBAL_STEPS + g) * secPerGlobalStep + 0.01;
+        seqEmitStep(oac, master, baseOct, g, when);
+      }
+    }
+    const rendered = await oac.startRendering();
+    const blob = audioBufferToWav(rendered);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const ts = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
+    a.href = url; a.download = `keroppa-seq-${ts}.wav`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  // ======== パターンのテキスト保存／読み込み ========
+  // 1行=1トラック: type,res,oct,voice,vol|step1.step2... （休符=., タイ=-）
+  function seqToText(){
+    const lines = SEQ.tracks.map((tr) => {
+      const head = [tr.type, tr.res, tr.oct||0, tr.voice||0, (tr.vol==null?100:tr.vol)].join(",");
+      const cells = tr.steps.map(v => v==null ? "." : (v===SEQ_TIE ? "-" : String(v))).join("");
+      return head + "|" + cells;
+    });
+    return `BPM=${SEQ.bpm}\n` + lines.join("\n");
+  }
+
+  function seqFromText(text){
+    if (!text || !text.trim()) return false;
+    const rows = text.replace(/\r/g,"").split("\n").map(s => s.trim()).filter(s => s.length);
+    const tracks = [];
+    let bpm = SEQ.bpm;
+    for (const row of rows){
+      if (/^BPM\s*=/i.test(row)){
+        const n = Number(row.split("=")[1]);
+        if (!isNaN(n)) bpm = Math.max(40, Math.min(300, n));
+        continue;
+      }
+      const bar = row.indexOf("|");
+      if (bar < 0) continue;
+      const head = row.slice(0, bar).split(",");
+      const cells = row.slice(bar+1);
+      const type = ["chord","note","drum"].includes(head[0]) ? head[0] : "chord";
+      let res = Number(head[1]) === 8 ? 8 : 4;
+      const oct = Math.max(-2, Math.min(2, Number(head[2])||0));
+      const voice = Math.max(0, Math.min(3, Number(head[3])||0));
+      const vol = Math.max(0, Math.min(100, head[4]==null||head[4]===""?100:Number(head[4])));
+      const want = seqStepsLen(res);
+      const steps = new Array(want).fill(null);
+      for (let i=0;i<Math.min(want, cells.length);i++){
+        const ch = cells[i];
+        if (ch === "." ) steps[i] = null;
+        else if (ch === "-") steps[i] = SEQ_TIE;
+        else if (ch >= "0" && ch <= "9") steps[i] = Number(ch);
+      }
+      tracks.push({ type, res, oct, voice, vol, steps, mute:false });
+    }
+    if (!tracks.length) return false;
+    SEQ.bpm = bpm;
+    seqBpmEl.value = String(bpm);
+    SEQ.tracks = tracks.slice(0, SEQ_MAX_TRACKS);
+    SEQ.selTrack = 0; SEQ.selStep = 0;
+    seqRenderTracks(); seqUpdateCounts();
+    return true;
+  }
+
+  if (seqWavBtn) seqWavBtn.addEventListener("click", () => {
+    seqWavBtn.disabled = true;
+    const prev = seqWavBtn.textContent;
+    seqWavBtn.textContent = "書き出し中…";
+    seqExportWav(1).catch(e => alert("WAV書き出しに失敗: " + e))
+      .finally(() => { seqWavBtn.disabled = false; seqWavBtn.textContent = prev; });
+  });
+  if (seqCopyBtn) seqCopyBtn.addEventListener("click", async () => {
+    const txt = seqToText();
+    seqTextArea.value = txt;
+    try { await navigator.clipboard.writeText(txt); seqCopyBtn.textContent = "コピー済み"; }
+    catch { seqTextArea.select(); seqCopyBtn.textContent = "↑を手動コピー"; }
+    setTimeout(() => { seqCopyBtn.textContent = "数字で出力"; }, 1500);
+  });
+  if (seqLoadBtn) seqLoadBtn.addEventListener("click", () => {
+    const ok = seqFromText(seqTextArea.value);
+    seqLoadBtn.textContent = ok ? "読込OK" : "形式エラー";
+    setTimeout(() => { seqLoadBtn.textContent = "貼り付けて読込"; }, 1500);
+  });
 
   // 初期トラックを1つ用意
   SEQ.tracks.push(seqMakeTrack("chord"));
