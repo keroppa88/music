@@ -307,10 +307,10 @@
       padding:6px 8px; background:#fff;
     }
     .seqTrack .thead{
-      display:flex; align-items:center; gap:6px;
-      flex:0 0 auto; width:230px;
+      display:flex; align-items:center; gap:5px;
+      flex:0 0 auto; width:360px; flex-wrap:wrap;
     }
-    .seqTrack select{ width:auto; min-width:74px; height:30px; }
+    .seqTrack select{ width:auto; min-width:68px; height:30px; }
     .seqTrack .tname{ font-weight:900; width:18px; text-align:center; }
     .seqGrid{
       display:flex; gap:4px; overflow-x:auto; flex:1; padding-bottom:2px;
@@ -613,7 +613,8 @@
         入力: セルをクリックして選択 → 数字キーで記録。<br>
         ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
         ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
-        休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・オクターブ・四分／八分を選択。
+        休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・音色・オクターブ・四分／八分を選択。<br>
+        ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。
       </div>
     </div>
   </div>
@@ -1365,7 +1366,7 @@
 
   function seqMakeTrack(type){
     const res = 4;
-    return { type: type || "chord", res, oct:0, steps: new Array(seqStepsLen(res)).fill(null), mute:false };
+    return { type: type || "chord", res, oct:0, voice:0, steps: new Array(seqStepsLen(res)).fill(null), mute:false };
   }
 
   // ドラム種別（digit -> 種類）
@@ -1423,6 +1424,16 @@
       octSelT.addEventListener("change", () => { tr.oct = Number(octSelT.value); });
       octSelT.style.display = (tr.type === "drum") ? "none" : "";
 
+      // 単音の音色（A/B/C/D = メイン画面の音色）
+      const voiceSel = document.createElement("select");
+      voiceSel.title = "音色（メイン画面のA/B/C/D）";
+      for (const [val, lab] of [[0,"音色A"],[1,"音色B"],[2,"音色C"],[3,"音色D"]]){
+        const o = document.createElement("option"); o.value=String(val); o.textContent=lab;
+        if ((tr.voice||0)===val) o.selected=true; voiceSel.appendChild(o);
+      }
+      voiceSel.addEventListener("change", () => { tr.voice = Number(voiceSel.value); });
+      voiceSel.style.display = (tr.type === "note") ? "" : "none";
+
       const resSel = document.createElement("select");
       for (const [val, lab] of [[4,"四分音符"],[8,"八分音符"]]){
         const o = document.createElement("option"); o.value=String(val); o.textContent=lab;
@@ -1447,7 +1458,7 @@
         seqRenderTracks(); seqUpdateCounts();
       });
 
-      head.appendChild(name); head.appendChild(typeSel); head.appendChild(octSelT); head.appendChild(resSel);
+      head.appendChild(name); head.appendChild(typeSel); head.appendChild(voiceSel); head.appendChild(octSelT); head.appendChild(resSel);
       head.appendChild(muteBtn); head.appendChild(del);
 
       const grid = document.createElement("div");
@@ -1575,7 +1586,42 @@
     return noteToMidi("C", octave) + semi;
   }
 
-  // ---- 単発トリガ ----
+  // ---- 単発トリガ（メイン画面の音色を使用） ----
+  // st: voicesState[i]（wave/filt/modDepth/modRate/vol/muted）を使い、音色を再現
+  function seqTriggerVoiced(freq, when, dur, st, gainScale){
+    if (!st || st.muted) return;
+    const o = ctx.createOscillator();
+    o.type = st.wave || "triangle";
+    o.frequency.value = freq;
+
+    const f = ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = st.filt || 8000;
+    f.Q.value = 0.707;
+
+    const g = ctx.createGain();
+    const peak = Math.max(0.05, volToGain(st.vol) * (gainScale || 1));
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(peak, when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+
+    o.connect(f); f.connect(g); g.connect(seqMaster);
+
+    // ビブラート（変調）
+    if (st.modDepth > 0){
+      const lfo = ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.value = modRateToHz(st.modRate);
+      const lg = ctx.createGain();
+      lg.gain.value = st.modDepth;
+      lfo.connect(lg); lg.connect(o.frequency);
+      lfo.start(when); lfo.stop(when + dur + 0.03);
+    }
+
+    o.start(when); o.stop(when + dur + 0.03);
+  }
+
+  // ---- 単発トリガ（汎用・素のオシレーター） ----
   function seqTriggerFreq(freq, when, dur, wave, gainVal){
     const o = ctx.createOscillator();
     o.type = wave || "triangle";
@@ -1652,15 +1698,21 @@
       const octave = baseOct + (tr.oct || 0);
 
       if (tr.type === "chord"){
-        const mids = chordMidisByChannel(v, octave);
-        const g = 0.10;
-        for (const m of mids) seqTriggerFreq(midiToHz(m), when, dur, "triangle", g);
+        // メイン画面の音色A/B/C/Dを各音に割当（A=最高音 … D=最低音）
+        const mids = chordMidisByChannel(v, octave); // 低→高
+        const n = mids.length;
+        for (let i=0;i<n;i++){
+          const voiceIdx = Math.max(0, Math.min(VOICES-1, (n-1) - i)); // 低音=D(3) … 高音=A(0)
+          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx], 4);
+        }
       } else if (tr.type === "drum"){
         const kind = SEQ_DRUMS[v];
         if (kind) seqTriggerDrum(kind, when);
       } else {
         if (v === 0) return;
-        seqTriggerFreq(midiToHz(noteMidiByDigit(v, octave)), when, dur, "square", 0.16);
+        // 単音はトラックで選んだ音色（A/B/C/D）を使用
+        const st = voicesState[Math.max(0, Math.min(VOICES-1, tr.voice || 0))];
+        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st, 5);
       }
     });
     // 再生ヘッド表示
