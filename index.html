@@ -1603,7 +1603,7 @@
 
   // ---- 単発トリガ（メイン画面の音色を使用） ----
   // st: voicesState[i]（wave/filt/modDepth/modRate/vol/muted）を使い、音色を再現
-  function seqTriggerVoiced(freq, when, dur, st, gainScale){
+  function seqTriggerVoiced(freq, when, dur, st){
     if (!st || st.muted) return;
     const o = ctx.createOscillator();
     o.type = st.wave || "triangle";
@@ -1615,9 +1615,15 @@
     f.Q.value = 0.707;
 
     const g = ctx.createGain();
-    const peak = Math.max(0.05, volToGain(st.vol) * (gainScale || 1));
+    // 音量はメイン画面と同じ（volToGain × seqMaster 0.9）
+    const peak = Math.max(0.0006, volToGain(st.vol));
+    // 持続的なエンベロープ（素早いアタック→保持→末尾で短いリリース）
+    const atk = 0.012;
+    const rel = Math.min(0.06, dur * 0.4);
+    const holdEnd = Math.max(when + atk + 0.005, when + dur - rel);
     g.gain.setValueAtTime(0.0001, when);
-    g.gain.exponentialRampToValueAtTime(peak, when + 0.008);
+    g.gain.exponentialRampToValueAtTime(peak, when + atk);
+    g.gain.setValueAtTime(peak, holdEnd);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
 
     o.connect(f); f.connect(g); g.connect(seqMaster);
@@ -1724,7 +1730,7 @@
         const n = mids.length;
         for (let i=0;i<n;i++){
           const voiceIdx = Math.max(0, Math.min(VOICES-1, (n-1) - i)); // 低音=D(3) … 高音=A(0)
-          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx], 4);
+          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx]);
         }
       } else if (tr.type === "drum"){
         const kind = SEQ_DRUMS[v];
@@ -1733,7 +1739,7 @@
         if (v === 0) return;
         // 単音はトラックで選んだ音色（A/B/C/D）を使用
         const st = voicesState[Math.max(0, Math.min(VOICES-1, tr.voice || 0))];
-        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st, 5);
+        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st);
       }
     });
     // 再生ヘッド表示
