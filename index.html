@@ -578,6 +578,7 @@
 
     <div class="btns">
             <button class="secondary" id="helpBtn" type="button">説明</button>
+      <button class="secondary" id="seqPageBtn" type="button">演奏録音</button>
 <button class="primary" id="playBtn">PLAY</button>
       <button class="secondary" id="stopBtn" disabled>STOP</button>
     </div>
@@ -589,27 +590,32 @@
     ショートカット: コードチャンネルは <code>0</code>〜<code>9</code>。オクターブは <code>A</code>=C2 / <code>S</code>=C3 / <code>D</code>=C4 / <code>F</code>=C5。/ <code>Space</code>=PLAY・STOP。
   </div>
 
-  <!-- ======== Step Sequencer (8 bars / 4-4 fixed) ======== -->
-  <div class="seqWrap" id="seqWrap">
-    <div class="seqTop">
-      <div class="lbl">シーケンサー（8小節・4/4）</div>
-      <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
-        BPM <input id="seqBpm" type="number" min="40" max="300" step="1" value="120">
-      </label>
-      <button class="primary" id="seqPlayBtn" type="button">▶ 再生</button>
-      <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
-      <button class="small" id="seqAddBtn" type="button">＋トラック</button>
-      <div class="val" id="seqTrackCount">トラック 0 / 6</div>
-    </div>
-    <div class="seqTracks" id="seqTracks"></div>
-    <div class="seqHint">
-      入力: セルをクリックして選択 → 数字キーで記録。<br>
-      ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
-      ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
-      休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・オクターブ・四分／八分を選択。
-    </div>
   </div>
 
+
+  <!-- ======== Sequencer Page ======== -->
+  <div id="pageSeq" class="page hidden">
+    <h1>演奏録音（シーケンサー）</h1>
+    <div class="seqWrap" id="seqWrap">
+      <div class="seqTop">
+        <div class="lbl">8小節・4/4</div>
+        <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
+          BPM <input id="seqBpm" type="number" min="40" max="300" step="1" value="120">
+        </label>
+        <button class="primary" id="seqPlayBtn" type="button">▶ 再生</button>
+        <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
+        <button class="small" id="seqAddBtn" type="button">＋トラック</button>
+        <div class="val" id="seqTrackCount">トラック 0 / 6</div>
+        <button class="secondary" id="seqBackBtn" type="button" style="margin-left:auto;">戻る</button>
+      </div>
+      <div class="seqTracks" id="seqTracks"></div>
+      <div class="seqHint">
+        入力: セルをクリックして選択 → 数字キーで記録。<br>
+        ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
+        ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
+        休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・オクターブ・四分／八分を選択。
+      </div>
+    </div>
   </div>
 
 
@@ -1293,32 +1299,34 @@
   // ======== Pseudo Page Switch (説明) ========
   const pageMain = document.getElementById("pageMain");
   const pageHelp = document.getElementById("pageHelp");
+  const pageSeq = document.getElementById("pageSeq");
   const helpBtn = document.getElementById("helpBtn");
   const helpBackBtn = document.getElementById("helpBackBtn");
+  const seqPageBtn = document.getElementById("seqPageBtn");
+  const seqBackBtn = document.getElementById("seqBackBtn");
 
-  function showHelpPage(){
-    if (!pageMain || !pageHelp) return;
-    pageMain.classList.add("hidden");
-    pageHelp.classList.remove("hidden");
-    // scroll to top for "page" feel
+  function scrollTop(){
     try { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); } catch { window.scrollTo(0,0); }
-    if (helpBackBtn) helpBackBtn.focus();
   }
-  function showMainPage(){
-    if (!pageMain || !pageHelp) return;
-    pageHelp.classList.add("hidden");
-    pageMain.classList.remove("hidden");
-    try { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); } catch { window.scrollTo(0,0); }
-    if (helpBtn) helpBtn.focus();
+  function showPage(page, focusEl){
+    [pageMain, pageHelp, pageSeq].forEach(p => { if (p) p.classList.add("hidden"); });
+    if (page) page.classList.remove("hidden");
+    scrollTop();
+    if (focusEl) focusEl.focus();
   }
+  function showHelpPage(){ showPage(pageHelp, helpBackBtn); }
+  function showSeqPage(){ showPage(pageSeq, seqBackBtn); }
+  function showMainPage(){ showPage(pageMain, helpBtn); }
 
   if (helpBtn) helpBtn.addEventListener("click", showHelpPage);
   if (helpBackBtn) helpBackBtn.addEventListener("click", showMainPage);
+  if (seqPageBtn) seqPageBtn.addEventListener("click", showSeqPage);
+  if (seqBackBtn) seqBackBtn.addEventListener("click", showMainPage);
 
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && pageHelp && !pageHelp.classList.contains("hidden")){
-      e.preventDefault();
-      showMainPage();
+    if (e.key === "Escape"){
+      if (pageHelp && !pageHelp.classList.contains("hidden")){ e.preventDefault(); showMainPage(); }
+      else if (pageSeq && !pageSeq.classList.contains("hidden")){ e.preventDefault(); showMainPage(); }
     }
   });
 
@@ -1520,6 +1528,8 @@
   // キャプチャ段階で先取りし、編集中は既存ショートカットへ伝播させない
   window.addEventListener("keydown", (ev) => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    // シーケンサーページ表示中のみ入力を捕捉（メイン画面のショートカットを妨げない）
+    if (!pageSeq || pageSeq.classList.contains("hidden")) return;
     if (!SEQ.tracks.length) return;
     const tag = (ev.target && ev.target.tagName) || "";
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
