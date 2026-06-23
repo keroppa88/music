@@ -308,9 +308,15 @@
     }
     .seqTrack .thead{
       display:flex; align-items:center; gap:5px;
-      flex:0 0 auto; width:360px; flex-wrap:wrap;
+      flex:0 0 auto; width:430px; flex-wrap:wrap;
     }
     .seqTrack select{ width:auto; min-width:68px; height:30px; }
+    .seqTrack .tvol{ display:flex; align-items:center; gap:4px; }
+    .seqTrack .tvol input[type="range"]{ width:70px; }
+    .seqTrack .tvolval{
+      font-variant-numeric: tabular-nums; color:var(--muted);
+      font-size:12px; font-weight:800; min-width:24px; text-align:right;
+    }
     .seqTrack .tname{ font-weight:900; width:18px; text-align:center; }
     .seqGrid{
       display:flex; gap:4px; overflow-x:auto; flex:1; padding-bottom:2px;
@@ -1371,7 +1377,7 @@
 
   function seqMakeTrack(type){
     const res = 4;
-    return { type: type || "chord", res, oct:0, voice:0, steps: new Array(seqStepsLen(res)).fill(null), mute:false };
+    return { type: type || "chord", res, oct:0, voice:0, vol:100, steps: new Array(seqStepsLen(res)).fill(null), mute:false };
   }
 
   // ドラム種別（digit -> 種類）
@@ -1451,6 +1457,17 @@
         seqRenderTracks();
       });
 
+      // トラック音量
+      const volWrap = document.createElement("label");
+      volWrap.className = "tvol"; volWrap.title = "トラック音量";
+      const volIn = document.createElement("input");
+      volIn.type = "range"; volIn.min = "0"; volIn.max = "100"; volIn.step = "1";
+      volIn.value = String(tr.vol == null ? 100 : tr.vol);
+      const volVal = document.createElement("span");
+      volVal.className = "tvolval"; volVal.textContent = volIn.value;
+      volIn.addEventListener("input", () => { tr.vol = Number(volIn.value); volVal.textContent = volIn.value; });
+      volWrap.appendChild(volIn); volWrap.appendChild(volVal);
+
       const muteBtn = document.createElement("button");
       muteBtn.className = "muteBtn"; muteBtn.textContent = "M";
       muteBtn.classList.toggle("on", tr.mute);
@@ -1465,7 +1482,7 @@
       });
 
       head.appendChild(name); head.appendChild(typeSel); head.appendChild(voiceSel); head.appendChild(octSelT); head.appendChild(resSel);
-      head.appendChild(muteBtn); head.appendChild(del);
+      head.appendChild(volWrap); head.appendChild(muteBtn); head.appendChild(del);
 
       const grid = document.createElement("div");
       grid.className = "seqGrid";
@@ -1603,8 +1620,9 @@
 
   // ---- 単発トリガ（メイン画面の音色を使用） ----
   // st: voicesState[i]（wave/filt/modDepth/modRate/vol/muted）を使い、音色を再現
-  function seqTriggerVoiced(freq, when, dur, st){
+  function seqTriggerVoiced(freq, when, dur, st, mult){
     if (!st || st.muted) return;
+    const m = (mult == null) ? 1 : mult;
     const o = ctx.createOscillator();
     o.type = st.wave || "triangle";
     o.frequency.value = freq;
@@ -1616,7 +1634,7 @@
 
     const g = ctx.createGain();
     // 音量はメイン画面と同じ（volToGain × seqMaster 0.9）
-    const peak = Math.max(0.0006, volToGain(st.vol));
+    const peak = Math.max(0.0006, volToGain(st.vol) * m);
     // 持続的なエンベロープ（素早いアタック→保持→末尾で短いリリース）
     const atk = 0.012;
     const rel = Math.min(0.06, dur * 0.4);
@@ -1656,13 +1674,14 @@
   }
 
   // ---- ドラム合成 ----
-  function seqTriggerDrum(kind, when){
+  function seqTriggerDrum(kind, when, mult){
+    const m = (mult == null) ? 1 : mult;
     if (kind === "kick"){
       const o = ctx.createOscillator(); o.type = "sine";
       o.frequency.setValueAtTime(150, when);
       o.frequency.exponentialRampToValueAtTime(50, when + 0.12);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.9, when);
+      g.gain.setValueAtTime(0.9 * m, when);
       g.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
       o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.2);
       return;
@@ -1672,7 +1691,7 @@
       o.frequency.setValueAtTime(220, when);
       o.frequency.exponentialRampToValueAtTime(90, when + 0.18);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.7, when);
+      g.gain.setValueAtTime(0.7 * m, when);
       g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
       o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.24);
       return;
@@ -1688,8 +1707,8 @@
     hp.type = (kind === "snare" || kind === "clap") ? "highpass" : "highpass";
     hp.frequency.value = (kind === "hat" || kind === "openhat") ? 7000 : 1500;
     const g = ctx.createGain();
-    const peak = (kind === "snare") ? 0.6 : (kind === "clap") ? 0.5 : 0.35;
-    g.gain.setValueAtTime(peak, when);
+    const peak = ((kind === "snare") ? 0.6 : (kind === "clap") ? 0.5 : 0.35) * m;
+    g.gain.setValueAtTime(Math.max(0.0002, peak), when);
     g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
     src.connect(hp); hp.connect(g); g.connect(seqMaster);
     src.start(when); src.stop(when + dur + 0.02);
@@ -1697,7 +1716,7 @@
       // 胴鳴り成分
       const o = ctx.createOscillator(); o.type="triangle"; o.frequency.value=180;
       const og = ctx.createGain();
-      og.gain.setValueAtTime(0.4, when);
+      og.gain.setValueAtTime(0.4 * m, when);
       og.gain.exponentialRampToValueAtTime(0.0001, when + 0.12);
       o.connect(og); og.connect(seqMaster); o.start(when); o.stop(when + 0.14);
     }
@@ -1723,6 +1742,7 @@
       }
       const dur = Math.max(0.08, stepDur * (1 + ties) * 0.95);
       const octave = baseOct + (tr.oct || 0);
+      const mult = (tr.vol == null ? 100 : tr.vol) / 100; // トラック音量
 
       if (tr.type === "chord"){
         // メイン画面の音色A/B/C/Dを各音に割当（A=最高音 … D=最低音）
@@ -1730,16 +1750,16 @@
         const n = mids.length;
         for (let i=0;i<n;i++){
           const voiceIdx = Math.max(0, Math.min(VOICES-1, (n-1) - i)); // 低音=D(3) … 高音=A(0)
-          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx]);
+          seqTriggerVoiced(midiToHz(mids[i]), when, dur, voicesState[voiceIdx], mult);
         }
       } else if (tr.type === "drum"){
         const kind = SEQ_DRUMS[v];
-        if (kind) seqTriggerDrum(kind, when);
+        if (kind) seqTriggerDrum(kind, when, mult);
       } else {
         if (v === 0) return;
         // 単音はトラックで選んだ音色（A/B/C/D）を使用
         const st = voicesState[Math.max(0, Math.min(VOICES-1, tr.voice || 0))];
-        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st);
+        seqTriggerVoiced(midiToHz(noteMidiByDigit(v, octave)), when, dur, st, mult);
       }
     });
     // 再生ヘッド表示
