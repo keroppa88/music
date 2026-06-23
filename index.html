@@ -318,13 +318,16 @@
     .seqBar{ display:flex; gap:2px; padding:0 3px; border-left:2px solid var(--border); }
     .seqBar:first-child{ border-left:none; }
     .seqCell{
-      width:24px; height:34px;
+      width:22px; height:34px;
       border:1px solid var(--border); border-radius:6px;
       background:#fff; color:var(--text);
       font-weight:800; font-size:13px; cursor:pointer;
       display:flex; align-items:center; justify-content:center;
       font-variant-numeric: tabular-nums; padding:0;
+      flex:0 0 auto;
     }
+    .seqCell.q{ width:46px; }   /* 四分音符 = 八分音符の2倍幅 */
+    .seqCell.tie{ color:#888; }
     .seqCell.rest{ color:#bbb; }
     .seqCell.sel{ outline:2px solid var(--accent); outline-offset:-1px; }
     .seqCell.play{ background:#fff3cc; border-color:#e0c46a; }
@@ -598,7 +601,7 @@
     <h1>演奏録音（シーケンサー）</h1>
     <div class="seqWrap" id="seqWrap">
       <div class="seqTop">
-        <div class="lbl">8小節・4/4</div>
+        <div class="lbl">4小節・4/4</div>
         <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
           BPM <input id="seqBpm" type="number" min="40" max="300" step="1" value="120">
         </label>
@@ -613,7 +616,8 @@
         入力: セルをクリックして選択 → 数字キーで記録。<br>
         ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
         ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
-        休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・音色・オクターブ・四分／八分を選択。<br>
+        前音を伸ばす（タイ）は <code>-</code> キーで「−」を入力。 休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。<br>
+        各トラックで種別・音色・オクターブ・四分／八分を選択。四分音符のマスは八分音符の2倍幅（マスの長さ＝音の長さ）。<br>
         ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。
       </div>
     </div>
@@ -1341,10 +1345,11 @@
     selStep: 0,
     playing: false,
   };
-  const SEQ_BARS = 8, SEQ_BEATS = 4;
+  const SEQ_BARS = 4, SEQ_BEATS = 4;
+  const SEQ_TIE = "-"; // 前音を伸ばすタイ記号
   const SEQ_MAX_TRACKS = 6;
-  // グローバルクロックは八分音符基準（8小節 * 4拍 * 2 = 64ステップ）
-  const SEQ_GLOBAL_STEPS = SEQ_BARS * SEQ_BEATS * 2; // 64
+  // グローバルクロックは八分音符基準（4小節 * 4拍 * 2 = 32ステップ）
+  const SEQ_GLOBAL_STEPS = SEQ_BARS * SEQ_BEATS * 2; // 32
   // 単音用：Cメジャー音階（digit 1..9 -> 度数）
   const SEQ_DEGREES = [0, 2, 4, 5, 7, 9, 11, 12, 14];
 
@@ -1390,6 +1395,7 @@
   // セル値の表示文字
   function seqCellChar(tr, v){
     if (v == null) return "·";
+    if (v === SEQ_TIE) return "−";
     return String(v);
   }
 
@@ -1472,9 +1478,12 @@
           const cell = document.createElement("button");
           cell.className = "seqCell";
           cell.dataset.idx = String(idx);
+          // 四分音符は八分音符の2倍幅（箱の長さ＝音の長さ）
+          cell.classList.add(tr.res === 8 ? "e" : "q");
           const v = tr.steps[idx];
           cell.textContent = seqCellChar(tr, v);
           if (v == null) cell.classList.add("rest");
+          if (v === SEQ_TIE) cell.classList.add("tie");
           if (ti === SEQ.selTrack && idx === SEQ.selStep) cell.classList.add("sel");
           cell.addEventListener("click", () => {
             if (SEQ.selTrack === ti && SEQ.selStep === idx){
@@ -1552,6 +1561,12 @@
       const d = Number(k);
       if (tr.type === "note" && d === 0){ seqSetSelValue(null); }
       else { seqSetSelValue(d); }
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      return;
+    }
+    if (k === "-" || k === "ー" || k === "_"){
+      // 前音を伸ばす（タイ）。ドラムには無効
+      if (tr.type !== "drum") seqSetSelValue(SEQ_TIE);
       ev.preventDefault(); ev.stopImmediatePropagation();
       return;
     }
@@ -1692,9 +1707,15 @@
       else { if (globalStep % 2 !== 0) return; localIdx = globalStep / 2; }
       const v = tr.steps[localIdx];
       if (v == null) return;
+      if (v === SEQ_TIE) return; // タイは前音に吸収済み（新規発音しない）
 
       const stepDur = (60 / SEQ.bpm) * (tr.res === 8 ? 0.5 : 1.0);
-      const dur = Math.max(0.08, stepDur * 0.9);
+      // 後続のタイ「−」を数えて音を伸ばす
+      let ties = 0;
+      for (let j = localIdx + 1; j < tr.steps.length; j++){
+        if (tr.steps[j] === SEQ_TIE) ties++; else break;
+      }
+      const dur = Math.max(0.08, stepDur * (1 + ties) * 0.95);
       const octave = baseOct + (tr.oct || 0);
 
       if (tr.type === "chord"){
