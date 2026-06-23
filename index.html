@@ -280,6 +280,60 @@
       margin-top: 18px;
     }
 
+    /* ======== Sequencer ======== */
+    .seqWrap{
+      margin-top:20px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--panel);
+      padding:14px;
+    }
+    .seqTop{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+    .seqTop .lbl{ font-weight:900; }
+    .seqTop input[type="number"]{
+      width:66px; height:30px;
+      border:1px solid var(--border); border-radius:8px; padding:2px 6px;
+    }
+    .seqTracks{ display:flex; flex-direction:column; gap:8px; }
+    .seqTrack{
+      display:flex; align-items:center; gap:8px;
+      border:1px solid var(--border); border-radius:10px;
+      padding:6px 8px; background:#fff;
+    }
+    .seqTrack .thead{
+      display:flex; align-items:center; gap:6px;
+      flex:0 0 auto; width:230px;
+    }
+    .seqTrack select{ width:auto; min-width:74px; height:30px; }
+    .seqTrack .tname{ font-weight:900; width:18px; text-align:center; }
+    .seqGrid{
+      display:flex; gap:4px; overflow-x:auto; flex:1; padding-bottom:2px;
+    }
+    .seqBar{ display:flex; gap:2px; padding:0 3px; border-left:2px solid var(--border); }
+    .seqBar:first-child{ border-left:none; }
+    .seqCell{
+      width:24px; height:34px;
+      border:1px solid var(--border); border-radius:6px;
+      background:#fff; color:var(--text);
+      font-weight:800; font-size:13px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      font-variant-numeric: tabular-nums; padding:0;
+    }
+    .seqCell.rest{ color:#bbb; }
+    .seqCell.sel{ outline:2px solid var(--accent); outline-offset:-1px; }
+    .seqCell.play{ background:#fff3cc; border-color:#e0c46a; }
+    .seqTrack .tdel{
+      width:26px; height:26px; border-radius:6px;
+      border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:900;
+    }
+    .seqHint{ margin-top:8px; color:var(--muted); font-size:12px; line-height:1.5; }
+
   </style>
 </head>
 <body>  <div id="pageMain" class="page">
@@ -533,6 +587,27 @@
     仕様: コードチャンネル選択で周波数を上書き。割り当てコードは変更可能。<br>
     割当: A=最高音 / B=2番目 / C=3番目 / D=最低音（ハイ→ロー）。<br>
     ショートカット: コードチャンネルは <code>0</code>〜<code>9</code>。オクターブは <code>A</code>=C2 / <code>S</code>=C3 / <code>D</code>=C4 / <code>F</code>=C5。/ <code>Space</code>=PLAY・STOP。
+  </div>
+
+  <!-- ======== Step Sequencer (8 bars / 4-4 fixed) ======== -->
+  <div class="seqWrap" id="seqWrap">
+    <div class="seqTop">
+      <div class="lbl">シーケンサー（8小節・4/4）</div>
+      <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
+        BPM <input id="seqBpm" type="number" min="40" max="300" step="1" value="120">
+      </label>
+      <button class="primary" id="seqPlayBtn" type="button">▶ 再生</button>
+      <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
+      <button class="small" id="seqAddBtn" type="button">＋トラック</button>
+      <div class="val" id="seqTrackCount">トラック 0 / 6</div>
+    </div>
+    <div class="seqTracks" id="seqTracks"></div>
+    <div class="seqHint">
+      入力: セルをクリックして選択 → 数字キーで記録。<br>
+      ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
+      ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
+      休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。 各トラックで種別・オクターブ・四分／八分を選択。
+    </div>
   </div>
 
   </div>
@@ -1246,6 +1321,403 @@
       showMainPage();
     }
   });
+
+  // ======== Step Sequencer ========
+  // 8小節・4/4固定。トラック最大6。各トラック「コード(4音和音)」or「単音」。
+  // 解像度は四分音符/八分音符。数字キーで記録。
+  const SEQ = {
+    bpm: 120,
+    tracks: [],        // {type:'chord'|'note', res:4|8, steps:[Int|null,...], mute:false}
+    selTrack: 0,
+    selStep: 0,
+    playing: false,
+  };
+  const SEQ_BARS = 8, SEQ_BEATS = 4;
+  const SEQ_MAX_TRACKS = 6;
+  // グローバルクロックは八分音符基準（8小節 * 4拍 * 2 = 64ステップ）
+  const SEQ_GLOBAL_STEPS = SEQ_BARS * SEQ_BEATS * 2; // 64
+  // 単音用：Cメジャー音階（digit 1..9 -> 度数）
+  const SEQ_DEGREES = [0, 2, 4, 5, 7, 9, 11, 12, 14];
+
+  let seqMaster = null;
+  let seqTimer = null;
+  let seqNextStepTime = 0;
+  let seqCurStep = 0;
+  const SEQ_LOOKAHEAD = 0.1;     // s
+  const SEQ_INTERVAL = 25;       // ms
+
+  const seqTracksEl = document.getElementById("seqTracks");
+  const seqBpmEl = document.getElementById("seqBpm");
+  const seqPlayBtn = document.getElementById("seqPlayBtn");
+  const seqStopBtn = document.getElementById("seqStopBtn");
+  const seqAddBtn = document.getElementById("seqAddBtn");
+  const seqTrackCountEl = document.getElementById("seqTrackCount");
+
+  function seqStepsLen(res){ return SEQ_BARS * SEQ_BEATS * (res === 8 ? 2 : 1); } // 64 or 32
+
+  function seqMakeTrack(type){
+    const res = 4;
+    return { type: type || "chord", res, oct:0, steps: new Array(seqStepsLen(res)).fill(null), mute:false };
+  }
+
+  // ドラム種別（digit -> 種類）
+  const SEQ_DRUMS = { 1:"kick", 2:"snare", 3:"hat", 4:"openhat", 5:"tom", 6:"clap" };
+
+  function seqResizeTrack(tr, newRes){
+    const oldSteps = tr.steps, oldRes = tr.res;
+    const next = new Array(seqStepsLen(newRes)).fill(null);
+    // 拍位置を保ったまま移し替え（時間 = step / (res*beats) 小節内）
+    for (let i=0;i<oldSteps.length;i++){
+      if (oldSteps[i] == null) continue;
+      // oldのグローバル八分位置
+      const g = oldRes === 8 ? i : i * 2;
+      const ni = newRes === 8 ? g : Math.round(g/2);
+      if (ni >=0 && ni < next.length) next[ni] = oldSteps[i];
+    }
+    tr.res = newRes;
+    tr.steps = next;
+  }
+
+  // セル値の表示文字
+  function seqCellChar(tr, v){
+    if (v == null) return "·";
+    return String(v);
+  }
+
+  function seqRenderTracks(){
+    seqTracksEl.innerHTML = "";
+    SEQ.tracks.forEach((tr, ti) => {
+      const row = document.createElement("div");
+      row.className = "seqTrack";
+
+      const head = document.createElement("div");
+      head.className = "thead";
+
+      const name = document.createElement("div");
+      name.className = "tname";
+      name.textContent = String(ti + 1);
+
+      const typeSel = document.createElement("select");
+      for (const [val, lab] of [["chord","コード"],["note","単音"],["drum","ドラム"]]){
+        const o = document.createElement("option"); o.value=val; o.textContent=lab;
+        if (tr.type===val) o.selected=true; typeSel.appendChild(o);
+      }
+      typeSel.addEventListener("change", () => { tr.type = typeSel.value; seqRenderTracks(); });
+
+      // オクターブ（ドラム以外）
+      const octSelT = document.createElement("select");
+      octSelT.title = "オクターブ移調";
+      for (let o=-2;o<=2;o++){
+        const op = document.createElement("option");
+        op.value=String(o); op.textContent=(o>=0?`+${o}`:`${o}`)+"oct";
+        if (tr.oct===o) op.selected=true; octSelT.appendChild(op);
+      }
+      octSelT.addEventListener("change", () => { tr.oct = Number(octSelT.value); });
+      octSelT.style.display = (tr.type === "drum") ? "none" : "";
+
+      const resSel = document.createElement("select");
+      for (const [val, lab] of [[4,"四分音符"],[8,"八分音符"]]){
+        const o = document.createElement("option"); o.value=String(val); o.textContent=lab;
+        if (tr.res===val) o.selected=true; resSel.appendChild(o);
+      }
+      resSel.addEventListener("change", () => {
+        seqResizeTrack(tr, Number(resSel.value));
+        if (SEQ.selTrack === ti) SEQ.selStep = Math.min(SEQ.selStep, tr.steps.length-1);
+        seqRenderTracks();
+      });
+
+      const muteBtn = document.createElement("button");
+      muteBtn.className = "muteBtn"; muteBtn.textContent = "M";
+      muteBtn.classList.toggle("on", tr.mute);
+      muteBtn.addEventListener("click", () => { tr.mute = !tr.mute; muteBtn.classList.toggle("on", tr.mute); });
+
+      const del = document.createElement("button");
+      del.className = "tdel"; del.textContent = "×"; del.title = "トラック削除";
+      del.addEventListener("click", () => {
+        SEQ.tracks.splice(ti,1);
+        if (SEQ.selTrack >= SEQ.tracks.length) SEQ.selTrack = Math.max(0, SEQ.tracks.length-1);
+        seqRenderTracks(); seqUpdateCounts();
+      });
+
+      head.appendChild(name); head.appendChild(typeSel); head.appendChild(octSelT); head.appendChild(resSel);
+      head.appendChild(muteBtn); head.appendChild(del);
+
+      const grid = document.createElement("div");
+      grid.className = "seqGrid";
+      const perBar = tr.res === 8 ? 8 : 4;
+      for (let b=0;b<SEQ_BARS;b++){
+        const bar = document.createElement("div");
+        bar.className = "seqBar";
+        for (let s=0;s<perBar;s++){
+          const idx = b*perBar + s;
+          const cell = document.createElement("button");
+          cell.className = "seqCell";
+          cell.dataset.idx = String(idx);
+          const v = tr.steps[idx];
+          cell.textContent = seqCellChar(tr, v);
+          if (v == null) cell.classList.add("rest");
+          if (ti === SEQ.selTrack && idx === SEQ.selStep) cell.classList.add("sel");
+          cell.addEventListener("click", () => {
+            if (SEQ.selTrack === ti && SEQ.selStep === idx){
+              // 同じセル再クリックで休符トグル
+              tr.steps[idx] = (tr.steps[idx] == null) ? (tr.type==="chord" ? 0 : 1) : null;
+            }
+            SEQ.selTrack = ti; SEQ.selStep = idx;
+            seqRenderTracks();
+          });
+          bar.appendChild(cell);
+        }
+        grid.appendChild(bar);
+      }
+
+      row.appendChild(head);
+      row.appendChild(grid);
+      seqTracksEl.appendChild(row);
+    });
+  }
+
+  function seqUpdateCounts(){
+    seqTrackCountEl.textContent = `トラック ${SEQ.tracks.length} / ${SEQ_MAX_TRACKS}`;
+    seqAddBtn.disabled = SEQ.tracks.length >= SEQ_MAX_TRACKS;
+  }
+
+  seqAddBtn.addEventListener("click", () => {
+    if (SEQ.tracks.length >= SEQ_MAX_TRACKS) return;
+    SEQ.tracks.push(seqMakeTrack("chord"));
+    SEQ.selTrack = SEQ.tracks.length - 1;
+    SEQ.selStep = 0;
+    seqRenderTracks(); seqUpdateCounts();
+  });
+
+  seqBpmEl.addEventListener("change", () => {
+    const v = Math.max(40, Math.min(300, Number(seqBpmEl.value) || 120));
+    seqBpmEl.value = String(v); SEQ.bpm = v;
+  });
+
+  // ---- 数字キー等での記録 ----
+  function seqSetSelValue(v){
+    const tr = SEQ.tracks[SEQ.selTrack];
+    if (!tr) return;
+    tr.steps[SEQ.selStep] = v;
+    // 次のステップへ進める
+    SEQ.selStep = Math.min(tr.steps.length - 1, SEQ.selStep + 1);
+    seqRenderTracks();
+  }
+  function seqMoveSel(d){
+    const tr = SEQ.tracks[SEQ.selTrack];
+    if (!tr) return;
+    SEQ.selStep = Math.max(0, Math.min(tr.steps.length - 1, SEQ.selStep + d));
+    seqRenderTracks();
+  }
+  function seqMoveTrack(d){
+    if (!SEQ.tracks.length) return;
+    SEQ.selTrack = Math.max(0, Math.min(SEQ.tracks.length - 1, SEQ.selTrack + d));
+    const tr = SEQ.tracks[SEQ.selTrack];
+    SEQ.selStep = Math.min(SEQ.selStep, tr.steps.length - 1);
+    seqRenderTracks();
+  }
+
+  // キャプチャ段階で先取りし、編集中は既存ショートカットへ伝播させない
+  window.addEventListener("keydown", (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (!SEQ.tracks.length) return;
+    const tag = (ev.target && ev.target.tagName) || "";
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    const tr = SEQ.tracks[SEQ.selTrack];
+    if (!tr) return;
+
+    const k = ev.key;
+    if (k.length === 1 && k >= "0" && k <= "9"){
+      const d = Number(k);
+      if (tr.type === "note" && d === 0){ seqSetSelValue(null); }
+      else { seqSetSelValue(d); }
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      return;
+    }
+    if (k === "." || k === "Backspace" || k === "Delete"){
+      seqSetSelValue(null);
+      // setSelValueは進めてしまうので戻す（休符入力は据え置きが自然）
+      seqMoveSel(-1);
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      return;
+    }
+    if (k === "ArrowRight"){ seqMoveSel(+1); ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+    if (k === "ArrowLeft"){ seqMoveSel(-1); ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+    if (k === "ArrowDown"){ seqMoveTrack(+1); ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+    if (k === "ArrowUp"){ seqMoveTrack(-1); ev.preventDefault(); ev.stopImmediatePropagation(); return; }
+  }, true); // capture
+
+  // ---- 和音/単音の周波数算出 ----
+  function chordMidisByChannel(channelIndex, octave){
+    const cc = chordChannels[channelIndex];
+    if (!cc) return [];
+    const qual = QUALITIES[cc.qual];
+    if (!qual) return [];
+    const rootMidi = noteToMidi(cc.root, octave);
+    let mids = qual.intervals.map(x => rootMidi + x);
+    if (mids.length === 3) mids.push(rootMidi + 12);
+    if (cc.qual === "maj7") mids = [rootMidi, rootMidi+11, rootMidi+4, rootMidi+7];
+    mids = mids.sort((a,b)=>a-b).slice(0,4);
+    return mids;
+  }
+  function noteMidiByDigit(digit, octave){
+    const semi = SEQ_DEGREES[Math.max(0, Math.min(SEQ_DEGREES.length-1, digit-1))];
+    return noteToMidi("C", octave) + semi;
+  }
+
+  // ---- 単発トリガ ----
+  function seqTriggerFreq(freq, when, dur, wave, gainVal){
+    const o = ctx.createOscillator();
+    o.type = wave || "triangle";
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gainVal), when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    o.connect(g); g.connect(seqMaster);
+    o.start(when); o.stop(when + dur + 0.03);
+  }
+
+  // ---- ドラム合成 ----
+  function seqTriggerDrum(kind, when){
+    if (kind === "kick"){
+      const o = ctx.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(150, when);
+      o.frequency.exponentialRampToValueAtTime(50, when + 0.12);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.9, when);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
+      o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.2);
+      return;
+    }
+    if (kind === "tom"){
+      const o = ctx.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(220, when);
+      o.frequency.exponentialRampToValueAtTime(90, when + 0.18);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.7, when);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+      o.connect(g); g.connect(seqMaster); o.start(when); o.stop(when + 0.24);
+      return;
+    }
+    // ノイズ系（snare / hat / openhat / clap）
+    const dur = (kind === "openhat") ? 0.3 : (kind === "snare" || kind === "clap") ? 0.18 : 0.05;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i=0;i<len;i++) d[i] = Math.random()*2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const hp = ctx.createBiquadFilter();
+    hp.type = (kind === "snare" || kind === "clap") ? "highpass" : "highpass";
+    hp.frequency.value = (kind === "hat" || kind === "openhat") ? 7000 : 1500;
+    const g = ctx.createGain();
+    const peak = (kind === "snare") ? 0.6 : (kind === "clap") ? 0.5 : 0.35;
+    g.gain.setValueAtTime(peak, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    src.connect(hp); hp.connect(g); g.connect(seqMaster);
+    src.start(when); src.stop(when + dur + 0.02);
+    if (kind === "snare"){
+      // 胴鳴り成分
+      const o = ctx.createOscillator(); o.type="triangle"; o.frequency.value=180;
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.4, when);
+      og.gain.exponentialRampToValueAtTime(0.0001, when + 0.12);
+      o.connect(og); og.connect(seqMaster); o.start(when); o.stop(when + 0.14);
+    }
+  }
+
+  function seqScheduleStep(globalStep, when){
+    const baseOct = Number(octSel.value);
+    SEQ.tracks.forEach((tr) => {
+      if (tr.mute) return;
+      // このトラックがこのグローバル(八分)ステップで発音するか
+      let localIdx;
+      if (tr.res === 8){ localIdx = globalStep; }
+      else { if (globalStep % 2 !== 0) return; localIdx = globalStep / 2; }
+      const v = tr.steps[localIdx];
+      if (v == null) return;
+
+      const stepDur = (60 / SEQ.bpm) * (tr.res === 8 ? 0.5 : 1.0);
+      const dur = Math.max(0.08, stepDur * 0.9);
+      const octave = baseOct + (tr.oct || 0);
+
+      if (tr.type === "chord"){
+        const mids = chordMidisByChannel(v, octave);
+        const g = 0.10;
+        for (const m of mids) seqTriggerFreq(midiToHz(m), when, dur, "triangle", g);
+      } else if (tr.type === "drum"){
+        const kind = SEQ_DRUMS[v];
+        if (kind) seqTriggerDrum(kind, when);
+      } else {
+        if (v === 0) return;
+        seqTriggerFreq(midiToHz(noteMidiByDigit(v, octave)), when, dur, "square", 0.16);
+      }
+    });
+    // 再生ヘッド表示
+    seqHighlightPlayhead(globalStep, when);
+  }
+
+  function seqHighlightPlayhead(globalStep, when){
+    const delay = Math.max(0, (when - ctx.currentTime) * 1000);
+    setTimeout(() => {
+      if (!SEQ.playing) return;
+      const rows = seqTracksEl.querySelectorAll(".seqTrack");
+      rows.forEach((row, ti) => {
+        const tr = SEQ.tracks[ti];
+        if (!tr) return;
+        row.querySelectorAll(".seqCell.play").forEach(c => c.classList.remove("play"));
+        let localIdx;
+        if (tr.res === 8) localIdx = globalStep;
+        else { if (globalStep % 2 !== 0) return; localIdx = globalStep / 2; }
+        const cell = row.querySelector(`.seqCell[data-idx="${localIdx}"]`);
+        if (cell) cell.classList.add("play");
+      });
+    }, delay);
+  }
+
+  function seqScheduler(){
+    const secPerGlobalStep = (60 / SEQ.bpm) / 2; // 八分音符
+    while (seqNextStepTime < ctx.currentTime + SEQ_LOOKAHEAD){
+      seqScheduleStep(seqCurStep, seqNextStepTime);
+      seqNextStepTime += secPerGlobalStep;
+      seqCurStep = (seqCurStep + 1) % SEQ_GLOBAL_STEPS;
+    }
+  }
+
+  function seqStart(){
+    if (SEQ.playing) return;
+    if (!SEQ.tracks.length) return;
+    ensureCtx();
+    if (ctx.state === "suspended") ctx.resume();
+    if (!seqMaster){
+      seqMaster = ctx.createGain();
+      seqMaster.gain.value = 0.9;
+      seqMaster.connect(ctx.destination);
+    }
+    SEQ.playing = true;
+    seqCurStep = 0;
+    seqNextStepTime = ctx.currentTime + 0.06;
+    seqTimer = setInterval(seqScheduler, SEQ_INTERVAL);
+    seqPlayBtn.disabled = true;
+    seqStopBtn.disabled = false;
+  }
+
+  function seqStop(){
+    if (!SEQ.playing) return;
+    SEQ.playing = false;
+    if (seqTimer){ clearInterval(seqTimer); seqTimer = null; }
+    seqTracksEl.querySelectorAll(".seqCell.play").forEach(c => c.classList.remove("play"));
+    seqPlayBtn.disabled = false;
+    seqStopBtn.disabled = true;
+  }
+
+  seqPlayBtn.addEventListener("click", seqStart);
+  seqStopBtn.addEventListener("click", seqStop);
+
+  // 初期トラックを1つ用意
+  SEQ.tracks.push(seqMakeTrack("chord"));
+  seqRenderTracks();
+  seqUpdateCounts();
 
 })();
 </script>
