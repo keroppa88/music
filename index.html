@@ -637,6 +637,7 @@
         <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
         <button class="small" id="seqAddBtn" type="button">＋トラック</button>
         <button class="small" id="seqWavBtn" type="button">WAV出力</button>
+        <button class="small" id="seqM4aBtn" type="button">M4A出力</button>
         <div class="val" id="seqTrackCount">トラック 0 / 6</div>
         <button class="secondary" id="seqBackBtn" type="button" style="margin-left:auto;">戻る</button>
       </div>
@@ -659,7 +660,8 @@
         各トラックで種別・音色・オクターブ・音符の長さ（全音符／二分音符／四分音符／八分音符）を選択。マスの幅＝音の長さ（全音符は1小節ぶん、八分音符の8倍幅）。<br>
         ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。<br>
         出力小節: 再生とWAV出力に使う長さを 1小節のみ／1〜2／1〜3／1〜4小節 から選べます（範囲外の小節は薄く表示）。<br>
-        WAV出力: 現在のパターンを1ループ分、音声ファイル（.wav）として書き出します。
+        WAV出力: 現在のパターンを1ループ分、無圧縮の音声ファイル（.wav）として書き出します（一瞬で完了）。<br>
+        M4A出力: 同じ内容を圧縮して .m4a（AAC 128kbps・WAVの約1/10のサイズ）で書き出します。ブラウザ内蔵のエンコーダを使うため曲の長さぶん時間がかかり、その間ボタンに残り秒数が出ます（書き出し中は無音）。AAC非対応のブラウザ（Firefox等）では .webm で保存されます。
       </div>
     </div>
   </div>
@@ -1417,6 +1419,7 @@
   const seqAddBtn = document.getElementById("seqAddBtn");
   const seqTrackCountEl = document.getElementById("seqTrackCount");
   const seqWavBtn = document.getElementById("seqWavBtn");
+  const seqM4aBtn = document.getElementById("seqM4aBtn");
   const seqCopyBtn = document.getElementById("seqCopyBtn");
   const seqLoadBtn = document.getElementById("seqLoadBtn");
   const seqTextArea = document.getElementById("seqTextArea");
@@ -1916,8 +1919,8 @@
     return new Blob([ab], { type: "audio/wav" });
   }
 
-  async function seqExportWav(loops){
-    if (!SEQ.tracks.length) return;
+  // パターンをオフラインで一括レンダリング（WAV/M4A共通）
+  async function seqRenderOffline(loops){
     const reps = Math.max(1, loops || 1);
     const secPerGlobalStep = (60 / SEQ.bpm) / 2;
     const outSteps = seqOutSteps();
@@ -1937,14 +1940,130 @@
         seqEmitStep(oac, master, baseOct, g, when);
       }
     }
-    const rendered = await oac.startRendering();
-    const blob = audioBufferToWav(rendered);
+    return await oac.startRendering();
+  }
+
+  function seqDownloadBlob(blob, ext){
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const ts = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
-    a.href = url; a.download = `keroppa-seq-${ts}.wav`;
+    a.href = url; a.download = `keroppa-seq-${ts}.${ext}`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  async function seqExportWav(loops){
+    if (!SEQ.tracks.length) return;
+    const rendered = await seqRenderOffline(loops);
+    seqDownloadBlob(audioBufferToWav(rendered), "wav");
+  }
+
+  // ======== M4A(AAC)書き出し（MediaRecorderで圧縮） ========
+  // ブラウザ内蔵のエンコーダを使うため、書き出しは曲の実時間ぶんかかる。
+  // AAC/mp4 が使えない環境では webm(Opus) 等にフォールバックする。
+  const SEQ_CMP_BITRATE = 128000; // 128kbps
+  // 優先順: AACを明示指定 → Opus系 → コーデック不明のmp4（中身を見て判定）
+  // ※ "audio/mp4" を無指定で使うとAACではなくOpusが入る環境があり、
+  //   .m4a という名前なのにApple系プレイヤーで開けないファイルになるため後回しにする。
+  const SEQ_REC_TYPES = [
+    "audio/mp4;codecs=mp4a.40.2", // AAC-LC
+    "audio/mp4;codecs=mp4a.40.5", // HE-AAC
+    "audio/aac",
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",                  // Safari等の保険（中身は書き出し後に判定）
+  ];
+
+  function seqPickRecMime(){
+    if (typeof MediaRecorder === "undefined") return null;
+    for (const mime of SEQ_REC_TYPES){
+      try { if (MediaRecorder.isTypeSupported(mime)) return mime; } catch {}
+    }
+    return ""; // ブラウザ既定に任せる
+  }
+
+  function seqBytesInclude(bytes, str){
+    const pat = Array.from(str, c => c.charCodeAt(0));
+    outer:
+    for (let i=0;i<=bytes.length-pat.length;i++){
+      for (let j=0;j<pat.length;j++) if (bytes[i+j] !== pat[j]) continue outer;
+      return true;
+    }
+    return false;
+  }
+
+  // 拡張子は「実際に入っているコーデック」に合わせる（中身と名前の食い違いを防ぐ）
+  async function seqExtFor(blob, mime){
+    const m = String(mime || "").toLowerCase();
+    if (m.includes("ogg")) return "ogg";
+    if (m.includes("webm")) return "webm";
+    try {
+      const head = new Uint8Array(await blob.slice(0, 8192).arrayBuffer());
+      if (seqBytesInclude(head, "mp4a")) return "m4a";   // AAC入りmp4 = m4a
+      if (seqBytesInclude(head, "Opus")) return "mp4";   // Opus入りmp4はm4aと名乗らせない
+    } catch {}
+    return "m4a";
+  }
+
+  async function seqExportCompressed(loops, onTick){
+    if (!SEQ.tracks.length) return null;
+    const mime = seqPickRecMime();
+    if (mime == null) throw new Error("このブラウザは MediaRecorder に対応していません");
+
+    const rendered = await seqRenderOffline(loops);
+
+    ensureCtx();
+    if (ctx.state === "suspended") await ctx.resume();
+
+    // レンダリング済みバッファを実時間で流し、MediaRecorderで圧縮する
+    // （出力先はMediaStreamなのでスピーカーからは鳴らない）
+    const src = ctx.createBufferSource();
+    src.buffer = rendered;
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(dest);
+
+    const opts = { audioBitsPerSecond: SEQ_CMP_BITRATE };
+    if (mime) opts.mimeType = mime;
+    const rec = new MediaRecorder(dest.stream, opts);
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+
+    const stopped = new Promise((resolve, reject) => {
+      rec.onstop = () => resolve();
+      rec.onerror = (e) => reject(e.error || new Error("MediaRecorder エラー"));
+    });
+
+    rec.start();
+    src.start();
+
+    let tickTimer = null;
+    if (onTick){
+      const endAt = performance.now() + rendered.duration * 1000;
+      onTick(rendered.duration);
+      tickTimer = setInterval(() => {
+        onTick(Math.max(0, (endAt - performance.now()) / 1000));
+      }, 100);
+    }
+
+    // 再生終了で停止。取りこぼし防止に保険のタイマーも張る
+    let guard = null;
+    const finish = () => { try { rec.state !== "inactive" && rec.stop(); } catch {} };
+    src.onended = finish;
+    guard = setTimeout(finish, rendered.duration * 1000 + 800);
+
+    try {
+      await stopped;
+    } finally {
+      if (tickTimer) clearInterval(tickTimer);
+      if (guard) clearTimeout(guard);
+      try { src.disconnect(); } catch {}
+      try { dest.stream.getTracks().forEach(t => t.stop()); } catch {}
+    }
+
+    const actual = rec.mimeType || mime;
+    const blob = new Blob(chunks, { type: actual || "audio/mp4" });
+    return { blob, ext: await seqExtFor(blob, actual) };
   }
 
   // ======== パターンのテキスト保存／読み込み ========
@@ -2011,6 +2130,26 @@
     seqWavBtn.textContent = "書き出し中…";
     seqExportWav(1).catch(e => alert("WAV書き出しに失敗: " + e))
       .finally(() => { seqWavBtn.disabled = false; seqWavBtn.textContent = prev; });
+  });
+  if (seqM4aBtn) seqM4aBtn.addEventListener("click", async () => {
+    if (!SEQ.tracks.length) return;
+    seqM4aBtn.disabled = true;
+    const prev = "M4A出力";
+    try {
+      const r = await seqExportCompressed(1, (left) => {
+        seqM4aBtn.textContent = `書き出し中… ${left.toFixed(1)}s`;
+      });
+      if (!r) return;
+      seqDownloadBlob(r.blob, r.ext);
+      // m4aで出せなかった場合（Firefox等）は実際の形式を知らせる
+      seqM4aBtn.textContent = (r.ext === "m4a") ? "完了" : `.${r.ext}で保存`;
+    } catch (e) {
+      alert("M4A書き出しに失敗: " + (e && e.message ? e.message : e));
+      seqM4aBtn.textContent = prev;
+    } finally {
+      seqM4aBtn.disabled = false;
+      setTimeout(() => { seqM4aBtn.textContent = prev; }, 1800);
+    }
   });
   if (seqCopyBtn) seqCopyBtn.addEventListener("click", async () => {
     const txt = seqToText();
