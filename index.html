@@ -300,6 +300,7 @@
       width:66px; height:30px;
       border:1px solid var(--border); border-radius:8px; padding:2px 6px;
     }
+    .seqTop select{ width:auto; min-width:120px; height:30px; }
     .seqTracks{ display:flex; flex-direction:column; gap:8px; }
     .seqTrack{
       display:flex; align-items:center; gap:8px;
@@ -333,6 +334,9 @@
       flex:0 0 auto;
     }
     .seqCell.q{ width:46px; }   /* 四分音符 = 八分音符の2倍幅 */
+    .seqCell.h{ width:94px; }   /* 二分音符 = 八分音符の4倍幅 */
+    .seqCell.w{ width:190px; }  /* 全音符   = 八分音符の8倍幅 */
+    .seqBar.off{ opacity:.3; }  /* 出力範囲外の小節 */
     .seqCell.tie{ color:#888; }
     .seqCell.rest{ color:#bbb; }
     .seqCell.sel{ outline:2px solid var(--accent); outline-offset:-1px; }
@@ -616,7 +620,16 @@
     <h1>演奏録音（シーケンサー）</h1>
     <div class="seqWrap" id="seqWrap">
       <div class="seqTop">
-        <div class="lbl">4小節・4/4</div>
+        <div class="lbl">4/4</div>
+        <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
+          出力小節
+          <select id="seqBarsSel" title="再生・WAV出力する小節数">
+            <option value="1">1小節のみ</option>
+            <option value="2">1〜2小節</option>
+            <option value="3">1〜3小節</option>
+            <option value="4" selected>1〜4小節</option>
+          </select>
+        </label>
         <label class="lbl" style="display:flex;align-items:center;gap:6px;font-weight:700;">
           BPM <input id="seqBpm" type="number" min="40" max="300" step="1" value="120">
         </label>
@@ -624,6 +637,7 @@
         <button class="secondary" id="seqStopBtn" type="button" disabled>■ 停止</button>
         <button class="small" id="seqAddBtn" type="button">＋トラック</button>
         <button class="small" id="seqWavBtn" type="button">WAV出力</button>
+        <button class="small" id="seqM4aBtn" type="button">M4A出力</button>
         <div class="val" id="seqTrackCount">トラック 0 / 6</div>
         <button class="secondary" id="seqBackBtn" type="button" style="margin-left:auto;">戻る</button>
       </div>
@@ -643,9 +657,11 @@
         ・コード: チャンネル <code>0</code>〜<code>9</code>（4音和音）　・単音: <code>1</code>〜<code>9</code>（Cメジャー音階・ベース/旋律はオクターブで調整）<br>
         ・ドラム: <code>1</code>キック <code>2</code>スネア <code>3</code>ハット <code>4</code>オープンハット <code>5</code>タム <code>6</code>クラップ<br>
         前音を伸ばす（タイ）は <code>-</code> キーで「−」を入力。 休符は <code>.</code> / <code>Backspace</code> / 同じセル再クリックでトグル。 矢印キーで移動。<br>
-        各トラックで種別・音色・オクターブ・四分／八分を選択。四分音符のマスは八分音符の2倍幅（マスの長さ＝音の長さ）。<br>
+        各トラックで種別・音色・オクターブ・音符の長さ（全音符／二分音符／四分音符／八分音符）を選択。マスの幅＝音の長さ（全音符は1小節ぶん、八分音符の8倍幅）。<br>
         ※音色はメイン画面で作った A/B/C/D（波形・フィルタ・変調・音量）を使用。コードは4音にA〜Dを割当、単音はトラックで選んだ音色で発音。<br>
-        WAV出力: 現在のパターンを1ループ分、音声ファイル（.wav）として書き出します。
+        出力小節: 再生とWAV出力に使う長さを 1小節のみ／1〜2／1〜3／1〜4小節 から選べます（範囲外の小節は薄く表示）。<br>
+        WAV出力: 現在のパターンを1ループ分、無圧縮の音声ファイル（.wav）として書き出します（一瞬で完了）。<br>
+        M4A出力: 同じ内容を圧縮して .m4a（AAC 128kbps・WAVの約1/10のサイズ）で書き出します。ブラウザ内蔵のエンコーダを使うため曲の長さぶん時間がかかり、その間ボタンに残り秒数が出ます（書き出し中は無音）。AAC非対応のブラウザ（Firefox等）では .webm で保存されます。
       </div>
     </div>
   </div>
@@ -1367,16 +1383,24 @@
   // 解像度は四分音符/八分音符。数字キーで記録。
   const SEQ = {
     bpm: 120,
-    tracks: [],        // {type:'chord'|'note', res:4|8, steps:[Int|null,...], mute:false}
+    tracks: [],        // {type:'chord'|'note'|'drum', res:1|2|4|8, steps:[Int|null,...], mute:false}
     selTrack: 0,
     selStep: 0,
     playing: false,
+    outBars: 4,        // 出力（再生・WAV）する小節数 1..4
   };
   const SEQ_BARS = 4, SEQ_BEATS = 4;
   const SEQ_TIE = "-"; // 前音を伸ばすタイ記号
   const SEQ_MAX_TRACKS = 6;
-  // グローバルクロックは八分音符基準（4小節 * 4拍 * 2 = 32ステップ）
-  const SEQ_GLOBAL_STEPS = SEQ_BARS * SEQ_BEATS * 2; // 32
+  // 音符の長さ（1小節あたりのマス数）: 1=全音符 / 2=二分音符 / 4=四分音符 / 8=八分音符
+  const SEQ_RES_LIST = [[1,"全音符"],[2,"二分音符"],[4,"四分音符"],[8,"八分音符"]];
+  const SEQ_RES_CLASS = { 1:"w", 2:"h", 4:"q", 8:"e" };
+  // グローバルクロックは八分音符基準（1小節 = 4拍 * 2 = 8ステップ）
+  const SEQ_STEPS_PER_BAR = SEQ_BEATS * 2; // 8
+  // 出力範囲のグローバルステップ数（再生ループ長・WAV長）
+  function seqOutSteps(){ return SEQ.outBars * SEQ_STEPS_PER_BAR; }
+  // 1マス = 何グローバルステップ分か（八分=1 / 四分=2 / 二分=4 / 全=8）
+  function seqStepSpan(res){ return SEQ_STEPS_PER_BAR / res; }
   // 単音用：Cメジャー音階（digit 1..9 -> 度数）
   const SEQ_DEGREES = [0, 2, 4, 5, 7, 9, 11, 12, 14];
 
@@ -1389,16 +1413,18 @@
 
   const seqTracksEl = document.getElementById("seqTracks");
   const seqBpmEl = document.getElementById("seqBpm");
+  const seqBarsSelEl = document.getElementById("seqBarsSel");
   const seqPlayBtn = document.getElementById("seqPlayBtn");
   const seqStopBtn = document.getElementById("seqStopBtn");
   const seqAddBtn = document.getElementById("seqAddBtn");
   const seqTrackCountEl = document.getElementById("seqTrackCount");
   const seqWavBtn = document.getElementById("seqWavBtn");
+  const seqM4aBtn = document.getElementById("seqM4aBtn");
   const seqCopyBtn = document.getElementById("seqCopyBtn");
   const seqLoadBtn = document.getElementById("seqLoadBtn");
   const seqTextArea = document.getElementById("seqTextArea");
 
-  function seqStepsLen(res){ return SEQ_BARS * SEQ_BEATS * (res === 8 ? 2 : 1); } // 64 or 32
+  function seqStepsLen(res){ return SEQ_BARS * res; } // 全4 / 二分8 / 四分16 / 八分32
 
   function seqMakeTrack(type){
     const res = 4;
@@ -1411,13 +1437,13 @@
   function seqResizeTrack(tr, newRes){
     const oldSteps = tr.steps, oldRes = tr.res;
     const next = new Array(seqStepsLen(newRes)).fill(null);
-    // 拍位置を保ったまま移し替え（時間 = step / (res*beats) 小節内）
+    const oldSpan = seqStepSpan(oldRes), newSpan = seqStepSpan(newRes);
+    // 拍位置を保ったまま移し替え（グローバル八分位置を基準に換算）
     for (let i=0;i<oldSteps.length;i++){
       if (oldSteps[i] == null) continue;
-      // oldのグローバル八分位置
-      const g = oldRes === 8 ? i : i * 2;
-      const ni = newRes === 8 ? g : Math.round(g/2);
-      if (ni >=0 && ni < next.length) next[ni] = oldSteps[i];
+      const g = i * oldSpan;               // oldのグローバル八分位置
+      const ni = Math.round(g / newSpan);  // newでのマス位置
+      if (ni >= 0 && ni < next.length) next[ni] = oldSteps[i];
     }
     tr.res = newRes;
     tr.steps = next;
@@ -1472,7 +1498,8 @@
       voiceSel.style.display = (tr.type === "note") ? "" : "none";
 
       const resSel = document.createElement("select");
-      for (const [val, lab] of [[4,"四分音符"],[8,"八分音符"]]){
+      resSel.title = "音符の長さ（マスの長さ＝音の長さ）";
+      for (const [val, lab] of SEQ_RES_LIST){
         const o = document.createElement("option"); o.value=String(val); o.textContent=lab;
         if (tr.res===val) o.selected=true; resSel.appendChild(o);
       }
@@ -1511,17 +1538,18 @@
 
       const grid = document.createElement("div");
       grid.className = "seqGrid";
-      const perBar = tr.res === 8 ? 8 : 4;
+      const perBar = tr.res;
       for (let b=0;b<SEQ_BARS;b++){
         const bar = document.createElement("div");
         bar.className = "seqBar";
+        if (b >= SEQ.outBars) bar.classList.add("off"); // 出力範囲外
         for (let s=0;s<perBar;s++){
           const idx = b*perBar + s;
           const cell = document.createElement("button");
           cell.className = "seqCell";
           cell.dataset.idx = String(idx);
-          // 四分音符は八分音符の2倍幅（箱の長さ＝音の長さ）
-          cell.classList.add(tr.res === 8 ? "e" : "q");
+          // マスの幅＝音の長さ（八分を基準に 2/4/8 倍）
+          cell.classList.add(SEQ_RES_CLASS[tr.res] || "q");
           const v = tr.steps[idx];
           cell.textContent = seqCellChar(tr, v);
           if (v == null) cell.classList.add("rest");
@@ -1557,6 +1585,15 @@
     SEQ.selTrack = SEQ.tracks.length - 1;
     SEQ.selStep = 0;
     seqRenderTracks(); seqUpdateCounts();
+  });
+
+  if (seqBarsSelEl) seqBarsSelEl.addEventListener("change", () => {
+    const n = Math.max(1, Math.min(SEQ_BARS, Number(seqBarsSelEl.value) || SEQ_BARS));
+    SEQ.outBars = n;
+    seqBarsSelEl.value = String(n);
+    // 再生中に短くなった場合、再生位置が範囲外に出ないよう戻す
+    if (seqCurStep >= seqOutSteps()) seqCurStep = 0;
+    seqRenderTracks();
   });
 
   seqBpmEl.addEventListener("change", () => {
@@ -1752,17 +1789,18 @@
     SEQ.tracks.forEach((tr) => {
       if (tr.mute) return;
       // このトラックがこのグローバル(八分)ステップで発音するか
-      let localIdx;
-      if (tr.res === 8){ localIdx = globalStep; }
-      else { if (globalStep % 2 !== 0) return; localIdx = globalStep / 2; }
+      const span = seqStepSpan(tr.res);
+      if (globalStep % span !== 0) return;
+      const localIdx = globalStep / span;
       const v = tr.steps[localIdx];
       if (v == null) return;
       if (v === SEQ_TIE) return; // タイは前音に吸収済み（新規発音しない）
 
-      const stepDur = (60 / SEQ.bpm) * (tr.res === 8 ? 0.5 : 1.0);
-      // 後続のタイ「−」を数えて音を伸ばす
+      const stepDur = (60 / SEQ.bpm) * (4 / tr.res); // 四分音符=1拍
+      // 後続のタイ「−」を数えて音を伸ばす（出力範囲を超えては伸ばさない）
+      const lastLocal = Math.min(tr.steps.length, Math.ceil(seqOutSteps() / span));
       let ties = 0;
-      for (let j = localIdx + 1; j < tr.steps.length; j++){
+      for (let j = localIdx + 1; j < lastLocal; j++){
         if (tr.steps[j] === SEQ_TIE) ties++; else break;
       }
       const dur = Math.max(0.08, stepDur * (1 + ties) * 0.95);
@@ -1804,9 +1842,9 @@
         const tr = SEQ.tracks[ti];
         if (!tr) return;
         row.querySelectorAll(".seqCell.play").forEach(c => c.classList.remove("play"));
-        let localIdx;
-        if (tr.res === 8) localIdx = globalStep;
-        else { if (globalStep % 2 !== 0) return; localIdx = globalStep / 2; }
+        const span = seqStepSpan(tr.res);
+        if (globalStep % span !== 0) return;
+        const localIdx = globalStep / span;
         const cell = row.querySelector(`.seqCell[data-idx="${localIdx}"]`);
         if (cell) cell.classList.add("play");
       });
@@ -1818,7 +1856,7 @@
     while (seqNextStepTime < ctx.currentTime + SEQ_LOOKAHEAD){
       seqScheduleStep(seqCurStep, seqNextStepTime);
       seqNextStepTime += secPerGlobalStep;
-      seqCurStep = (seqCurStep + 1) % SEQ_GLOBAL_STEPS;
+      seqCurStep = (seqCurStep + 1) % seqOutSteps();
     }
   }
 
@@ -1881,11 +1919,12 @@
     return new Blob([ab], { type: "audio/wav" });
   }
 
-  async function seqExportWav(loops){
-    if (!SEQ.tracks.length) return;
+  // パターンをオフラインで一括レンダリング（WAV/M4A共通）
+  async function seqRenderOffline(loops){
     const reps = Math.max(1, loops || 1);
     const secPerGlobalStep = (60 / SEQ.bpm) / 2;
-    const loopDur = SEQ_GLOBAL_STEPS * secPerGlobalStep;
+    const outSteps = seqOutSteps();
+    const loopDur = outSteps * secPerGlobalStep;
     const tail = 0.8; // 末尾の余韻
     const sr = 44100;
     const total = loopDur * reps + tail;
@@ -1896,19 +1935,135 @@
     master.connect(oac.destination);
     const baseOct = Number(octSel.value);
     for (let r=0;r<reps;r++){
-      for (let g=0;g<SEQ_GLOBAL_STEPS;g++){
-        const when = (r * SEQ_GLOBAL_STEPS + g) * secPerGlobalStep + 0.01;
+      for (let g=0;g<outSteps;g++){
+        const when = (r * outSteps + g) * secPerGlobalStep + 0.01;
         seqEmitStep(oac, master, baseOct, g, when);
       }
     }
-    const rendered = await oac.startRendering();
-    const blob = audioBufferToWav(rendered);
+    return await oac.startRendering();
+  }
+
+  function seqDownloadBlob(blob, ext){
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const ts = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
-    a.href = url; a.download = `keroppa-seq-${ts}.wav`;
+    a.href = url; a.download = `keroppa-seq-${ts}.${ext}`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  async function seqExportWav(loops){
+    if (!SEQ.tracks.length) return;
+    const rendered = await seqRenderOffline(loops);
+    seqDownloadBlob(audioBufferToWav(rendered), "wav");
+  }
+
+  // ======== M4A(AAC)書き出し（MediaRecorderで圧縮） ========
+  // ブラウザ内蔵のエンコーダを使うため、書き出しは曲の実時間ぶんかかる。
+  // AAC/mp4 が使えない環境では webm(Opus) 等にフォールバックする。
+  const SEQ_CMP_BITRATE = 128000; // 128kbps
+  // 優先順: AACを明示指定 → Opus系 → コーデック不明のmp4（中身を見て判定）
+  // ※ "audio/mp4" を無指定で使うとAACではなくOpusが入る環境があり、
+  //   .m4a という名前なのにApple系プレイヤーで開けないファイルになるため後回しにする。
+  const SEQ_REC_TYPES = [
+    "audio/mp4;codecs=mp4a.40.2", // AAC-LC
+    "audio/mp4;codecs=mp4a.40.5", // HE-AAC
+    "audio/aac",
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",                  // Safari等の保険（中身は書き出し後に判定）
+  ];
+
+  function seqPickRecMime(){
+    if (typeof MediaRecorder === "undefined") return null;
+    for (const mime of SEQ_REC_TYPES){
+      try { if (MediaRecorder.isTypeSupported(mime)) return mime; } catch {}
+    }
+    return ""; // ブラウザ既定に任せる
+  }
+
+  function seqBytesInclude(bytes, str){
+    const pat = Array.from(str, c => c.charCodeAt(0));
+    outer:
+    for (let i=0;i<=bytes.length-pat.length;i++){
+      for (let j=0;j<pat.length;j++) if (bytes[i+j] !== pat[j]) continue outer;
+      return true;
+    }
+    return false;
+  }
+
+  // 拡張子は「実際に入っているコーデック」に合わせる（中身と名前の食い違いを防ぐ）
+  async function seqExtFor(blob, mime){
+    const m = String(mime || "").toLowerCase();
+    if (m.includes("ogg")) return "ogg";
+    if (m.includes("webm")) return "webm";
+    try {
+      const head = new Uint8Array(await blob.slice(0, 8192).arrayBuffer());
+      if (seqBytesInclude(head, "mp4a")) return "m4a";   // AAC入りmp4 = m4a
+      if (seqBytesInclude(head, "Opus")) return "mp4";   // Opus入りmp4はm4aと名乗らせない
+    } catch {}
+    return "m4a";
+  }
+
+  async function seqExportCompressed(loops, onTick){
+    if (!SEQ.tracks.length) return null;
+    const mime = seqPickRecMime();
+    if (mime == null) throw new Error("このブラウザは MediaRecorder に対応していません");
+
+    const rendered = await seqRenderOffline(loops);
+
+    ensureCtx();
+    if (ctx.state === "suspended") await ctx.resume();
+
+    // レンダリング済みバッファを実時間で流し、MediaRecorderで圧縮する
+    // （出力先はMediaStreamなのでスピーカーからは鳴らない）
+    const src = ctx.createBufferSource();
+    src.buffer = rendered;
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(dest);
+
+    const opts = { audioBitsPerSecond: SEQ_CMP_BITRATE };
+    if (mime) opts.mimeType = mime;
+    const rec = new MediaRecorder(dest.stream, opts);
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+
+    const stopped = new Promise((resolve, reject) => {
+      rec.onstop = () => resolve();
+      rec.onerror = (e) => reject(e.error || new Error("MediaRecorder エラー"));
+    });
+
+    rec.start();
+    src.start();
+
+    let tickTimer = null;
+    if (onTick){
+      const endAt = performance.now() + rendered.duration * 1000;
+      onTick(rendered.duration);
+      tickTimer = setInterval(() => {
+        onTick(Math.max(0, (endAt - performance.now()) / 1000));
+      }, 100);
+    }
+
+    // 再生終了で停止。取りこぼし防止に保険のタイマーも張る
+    let guard = null;
+    const finish = () => { try { rec.state !== "inactive" && rec.stop(); } catch {} };
+    src.onended = finish;
+    guard = setTimeout(finish, rendered.duration * 1000 + 800);
+
+    try {
+      await stopped;
+    } finally {
+      if (tickTimer) clearInterval(tickTimer);
+      if (guard) clearTimeout(guard);
+      try { src.disconnect(); } catch {}
+      try { dest.stream.getTracks().forEach(t => t.stop()); } catch {}
+    }
+
+    const actual = rec.mimeType || mime;
+    const blob = new Blob(chunks, { type: actual || "audio/mp4" });
+    return { blob, ext: await seqExtFor(blob, actual) };
   }
 
   // ======== パターンのテキスト保存／読み込み ========
@@ -1919,7 +2074,7 @@
       const cells = tr.steps.map(v => v==null ? "." : (v===SEQ_TIE ? "-" : String(v))).join("");
       return head + "|" + cells;
     });
-    return `BPM=${SEQ.bpm}\n` + lines.join("\n");
+    return `BPM=${SEQ.bpm}\nBARS=${SEQ.outBars}\n` + lines.join("\n");
   }
 
   function seqFromText(text){
@@ -1927,10 +2082,16 @@
     const rows = text.replace(/\r/g,"").split("\n").map(s => s.trim()).filter(s => s.length);
     const tracks = [];
     let bpm = SEQ.bpm;
+    let outBars = SEQ.outBars;
     for (const row of rows){
       if (/^BPM\s*=/i.test(row)){
         const n = Number(row.split("=")[1]);
         if (!isNaN(n)) bpm = Math.max(40, Math.min(300, n));
+        continue;
+      }
+      if (/^BARS\s*=/i.test(row)){
+        const n = Number(row.split("=")[1]);
+        if (!isNaN(n)) outBars = Math.max(1, Math.min(SEQ_BARS, n));
         continue;
       }
       const bar = row.indexOf("|");
@@ -1938,7 +2099,7 @@
       const head = row.slice(0, bar).split(",");
       const cells = row.slice(bar+1);
       const type = ["chord","note","drum"].includes(head[0]) ? head[0] : "chord";
-      let res = Number(head[1]) === 8 ? 8 : 4;
+      let res = [1,2,4,8].includes(Number(head[1])) ? Number(head[1]) : 4;
       const oct = Math.max(-2, Math.min(2, Number(head[2])||0));
       const voice = Math.max(0, Math.min(3, Number(head[3])||0));
       const vol = Math.max(0, Math.min(100, head[4]==null||head[4]===""?100:Number(head[4])));
@@ -1955,6 +2116,8 @@
     if (!tracks.length) return false;
     SEQ.bpm = bpm;
     seqBpmEl.value = String(bpm);
+    SEQ.outBars = outBars;
+    if (seqBarsSelEl) seqBarsSelEl.value = String(outBars);
     SEQ.tracks = tracks.slice(0, SEQ_MAX_TRACKS);
     SEQ.selTrack = 0; SEQ.selStep = 0;
     seqRenderTracks(); seqUpdateCounts();
@@ -1967,6 +2130,26 @@
     seqWavBtn.textContent = "書き出し中…";
     seqExportWav(1).catch(e => alert("WAV書き出しに失敗: " + e))
       .finally(() => { seqWavBtn.disabled = false; seqWavBtn.textContent = prev; });
+  });
+  if (seqM4aBtn) seqM4aBtn.addEventListener("click", async () => {
+    if (!SEQ.tracks.length) return;
+    seqM4aBtn.disabled = true;
+    const prev = "M4A出力";
+    try {
+      const r = await seqExportCompressed(1, (left) => {
+        seqM4aBtn.textContent = `書き出し中… ${left.toFixed(1)}s`;
+      });
+      if (!r) return;
+      seqDownloadBlob(r.blob, r.ext);
+      // m4aで出せなかった場合（Firefox等）は実際の形式を知らせる
+      seqM4aBtn.textContent = (r.ext === "m4a") ? "完了" : `.${r.ext}で保存`;
+    } catch (e) {
+      alert("M4A書き出しに失敗: " + (e && e.message ? e.message : e));
+      seqM4aBtn.textContent = prev;
+    } finally {
+      seqM4aBtn.disabled = false;
+      setTimeout(() => { seqM4aBtn.textContent = prev; }, 1800);
+    }
   });
   if (seqCopyBtn) seqCopyBtn.addEventListener("click", async () => {
     const txt = seqToText();
@@ -1982,6 +2165,7 @@
   });
 
   // 初期トラックを1つ用意
+  if (seqBarsSelEl) SEQ.outBars = Math.max(1, Math.min(SEQ_BARS, Number(seqBarsSelEl.value) || SEQ_BARS));
   SEQ.tracks.push(seqMakeTrack("chord"));
   seqRenderTracks();
   seqUpdateCounts();
